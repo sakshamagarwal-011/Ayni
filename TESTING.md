@@ -394,8 +394,9 @@ Prerequisite: a live search (Photon/Overpass/proxy + OSRM) in a real room with t
 7. In A, re-run the same search and publish again: confirm no duplicate spots appear (same rows, same ids — check the spot count on Compare stays the same) and existing votes still reference the same spots.
 8. **Supersede (v0.7.1):** in A, run a search with a different category/area and publish the new batch. In B, confirm the NEW batch leads the compared set in ranked order and the OLD batch no longer leads (it falls back to tally order behind the new batch).
 9. (Negative) In a finalized room, confirm the publish button is disabled/absent with the finalized explanation, and a direct `publish-results` call with a finalized room returns 409.
+10. **Map follows the search (v0.7.2):** after a live search, confirm the map header reads "routes to \<ranked #1\>" with routes drawn to it (not to the first room spot). Tap result #3: confirm the map header, route lines, and legend re-point to #3 and that card shows the selected ring. Tap a room spot card: confirm the map returns to that room spot and no result card stays ringed. On Compare & vote, confirm the previewed-but-unpublished place does NOT appear (previews are local UI state only).
 
-- Pass: publish → live visibility in the second browser → shared ranked order for a guest with no engine order → vote → finalize → navigate, with honest labelling throughout, no duplicates on re-publish, and supersede on a new batch. Record the room code, browsers, and pass/fail per step.
+- Pass: publish → live visibility in the second browser → shared ranked order for a guest with no engine order → vote → finalize → navigate, with honest labelling throughout, no duplicates on re-publish, supersede on a new batch, and the Routes map following the search (auto-preview + tap-to-preview) without leaking previews onto Compare. Record the room code, browsers, and pass/fail per step.
 
 ### Recording the Phase 4 result
 

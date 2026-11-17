@@ -14,8 +14,9 @@ import { useRoomDetail } from '../lib/useRoomDetail';
 import { formatDistance, formatDuration } from '../lib/utils';
 import { describeRouteSource } from '../map/routing';
 import { useMapRoutes } from '../map/useMapRoutes';
+import { resolvePreviewTarget, type CandidatePlace } from '../engine';
 import { getRoomService, getServiceMode } from '../services';
-import type { RouteEstimate, TravelMode } from '../types';
+import type { MeetingSpot, RouteEstimate, TravelMode } from '../types';
 import { cn } from '../lib/utils';
 
 // Lazy: the MapLibre chunk loads with the map section, not the initial bundle.
@@ -30,6 +31,15 @@ export function RouteDiscovery() {
   const [estimatesError, setEstimatesError] = useState<string | null>(null);
   const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null);
   const [selectionLatched, setSelectionLatched] = useState(false);
+  // Transient search-result preview: a synthesized spot for a search
+  // result that is not a room spot yet. Local UI state only — never
+  // added to room state, voted on, or sent to the server (see
+  // src/engine/previewSpot.ts). Null when a room spot is selected.
+  const [previewSpot, setPreviewSpot] = useState<MeetingSpot | null>(null);
+  // OSM id of the search result currently previewed on the map, so the
+  // panel can ring it. Set by search preview, cleared by room-spot
+  // selection (card or pin).
+  const [previewedOsmId, setPreviewedOsmId] = useState<string | null>(null);
 
   const rankedSpots = useMemo(
     () =>
@@ -47,8 +57,25 @@ export function RouteDiscovery() {
       setSelectionLatched(true);
     }
   }, [rankedSpots, selectedSpotId, selectionLatched]);
-  const selectedSpot =
+  const roomSelectedSpot =
     rankedSpots.find((s) => s.id === selectedSpotId) ?? (selectionLatched ? null : (rankedSpots[0] ?? null));
+  // Effective selection: a search preview wins over the latched room
+  // selection. The map header, MeetingMap, legend, and route fetching
+  // below all follow this one value, so no further changes are needed
+  // for the map to follow the search.
+  const selectedSpot = previewSpot ?? roomSelectedSpot;
+  // If a previewed place becomes a room spot (published from this or
+  // another browser), swap the transient preview for the real spot so
+  // two pins never stack at the same coordinates. The panel ring stays:
+  // previewedOsmId is the same place either way.
+  useEffect(() => {
+    if (!previewSpot || !detail) return;
+    const match = detail.spots.find((s) => s.osmId != null && s.osmId === previewSpot.osmId);
+    if (match) {
+      setPreviewSpot(null);
+      setSelectedSpotId(match.id);
+    }
+  }, [detail, previewSpot]);
   const liveRoutes = useMapRoutes(detail?.participants ?? [], selectedSpot, mode, detail?.room.id ?? '');
   const liveByParticipant = useMemo(
     () => new globalThis.Map(liveRoutes.routes.map((r) => [r.participantId, r.geometry])),
@@ -122,6 +149,41 @@ export function RouteDiscovery() {
     );
   }
 
+  // Captured after the guard above (detail is non-null here): the
+  // preview handler below is a nested function, where TS does not
+  // carry the narrowing.
+  const roomSpots = detail.spots;
+
+  // Map preview follows the search: a result that maps to a room spot
+  // selects that spot; any other result previews a transient spot.
+  function handlePreviewCandidate(candidate: CandidatePlace) {
+    const target = resolvePreviewTarget(candidate, roomSpots);
+    setPreviewedOsmId(candidate.osmId);
+    if (target.kind === 'room') {
+      setPreviewSpot(null);
+      setSelectedSpotId(target.spot.id);
+    } else {
+      setPreviewSpot(target.spot);
+    }
+  }
+
+  // Tapping a map pin: the preview pin keeps the preview; any other
+  // pin clears it and restores the room-spot selection.
+  function handleMapSpotSelect(spotId: string) {
+    if (previewSpot && spotId === previewSpot.id) return;
+    setPreviewSpot(null);
+    setPreviewedOsmId(null);
+    setSelectedSpotId(spotId);
+  }
+
+  // Tapping a room spot card clears the search preview and selects
+  // that room spot.
+  function handleRoomSpotSelect(spotId: string) {
+    setPreviewSpot(null);
+    setPreviewedOsmId(null);
+    setSelectedSpotId(spotId);
+  }
+
   // Skeleton only until the FIRST estimates arrive: background refetches
   // (every Realtime update) must keep the existing cards on screen
   // instead of blanking them into a skeleton + replayed animations.
@@ -162,7 +224,7 @@ export function RouteDiscovery() {
 
       {estimatesError && <ErrorBanner message={estimatesError} onRetry={reload} />}
 
-      <OptimizationPanel detail={detail} mode={mode} />
+      <OptimizationPanel detail={detail} mode={mode} onPreviewCandidate={handlePreviewCandidate} previewedOsmId={previewedOsmId} />
 
       <section className="space-y-3" aria-label="Map of participants, spots, and routes">
         <div>
@@ -174,10 +236,10 @@ export function RouteDiscovery() {
         <Suspense fallback={<MapFallback />}>
           <MeetingMap
             participants={detail.participants}
-            spots={detail.spots}
+            spots={previewSpot ? [...detail.spots, previewSpot] : detail.spots}
             selectedSpotId={selectedSpot?.id ?? null}
             routes={mapLines}
-            onSpotSelect={setSelectedSpotId}
+            onSpotSelect={handleMapSpotSelect}
             fitKey={`routes-${mode}-${selectedSpot?.id ?? 'none'}`}
             ariaLabel="Map of participants, meeting spots, and routes"
           />
@@ -231,7 +293,7 @@ export function RouteDiscovery() {
                 spot={spot}
                 rank={i + 1}
                 selected={isSelected}
-                onSelect={() => setSelectedSpotId(spot.id)}
+                onSelect={() => handleRoomSpotSelect(spot.id)}
                 badge={i === 0 ? 'Fairest overall' : undefined}
                 footer={
                   <div>

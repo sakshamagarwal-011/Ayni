@@ -30,7 +30,7 @@ import {
   type OptimizationResult,
   type ParticipantOrigin,
 } from '../engine';
-import { formatDistance, formatDuration, osmDirectionsUrl } from '../lib/utils';
+import { cn, formatDistance, formatDuration, osmDirectionsUrl } from '../lib/utils';
 import { MODE_LABELS } from '../lib/distance';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { getRoomService } from '../services';
@@ -68,7 +68,23 @@ function endpointHostname(endpoint: string): string {
   }
 }
 
-export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: TravelMode }) {
+export function OptimizationPanel({
+  detail,
+  mode,
+  onPreviewCandidate,
+  previewedOsmId,
+}: {
+  detail: RoomDetail;
+  mode: TravelMode;
+  /**
+   * Called with the #1 result after a successful search, and when the
+   * user taps a result card: the Routes map previews that place.
+   * Never called for a failed or cancelled search.
+   */
+  onPreviewCandidate?: (candidate: CandidatePlace) => void;
+  /** OSM id of the result currently previewed on the map, for the selected ring. */
+  previewedOsmId?: string | null;
+}) {
   const [preference, setPreference] = useState<OptimizationPreference>('balanced');
   const [category, setCategory] = useState<MeetingCategory>('cafe');
   const [maxTravel, setMaxTravel] = useState('');
@@ -273,6 +289,11 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
       );
       if (!controller.signal.aborted) {
         setResult(outcome);
+        // Point the Routes map at the #1 result: the map follows the
+        // search instead of staying latched to the first room spot.
+        // Success only — a failed/cancelled search never touches the
+        // preview (failures throw before reaching this branch).
+        if (outcome.ranked.length > 0) onPreviewCandidate?.(outcome.ranked[0].candidate);
         // Demo-mode candidates are the room's spots (osmId "mock/<spot
         // id>"). Persist their ranked order so the comparison page can
         // show the engine top-5 in engine order. The stored order is
@@ -517,8 +538,42 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
                 : 'No places passed the filters. Try removing the max-travel limit or choosing a different category.'}
             </p>
           )}
-          {result.ranked.map((entry) => (
-            <article key={entry.candidate.osmId} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+          {result.ranked.map((entry) => {
+            const isPreviewed = previewedOsmId != null && previewedOsmId === entry.candidate.osmId;
+            return (
+            <article
+              key={entry.candidate.osmId}
+              className={cn(
+                'rounded-xl border border-white/10 bg-white/[0.03] p-4',
+                isPreviewed && 'border-violet-400/60 ring-2 ring-violet-500/40',
+                onPreviewCandidate && 'cursor-pointer',
+              )}
+              onClick={
+                onPreviewCandidate
+                  ? (e) => {
+                      // The Directions link inside the card keeps its
+                      // own behaviour: clicking it must not re-point
+                      // the map.
+                      if ((e.target as HTMLElement).closest('a')) return;
+                      onPreviewCandidate(entry.candidate);
+                    }
+                  : undefined
+              }
+              role={onPreviewCandidate ? 'button' : undefined}
+              tabIndex={onPreviewCandidate ? 0 : undefined}
+              onKeyDown={
+                onPreviewCandidate
+                  ? (e) => {
+                      if ((e.target as HTMLElement).closest('a')) return;
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onPreviewCandidate(entry.candidate);
+                      }
+                    }
+                  : undefined
+              }
+              aria-label={entry.candidate.name}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-gradient-to-r from-blue-600 to-violet-600 px-2.5 py-0.5 text-xs font-bold text-white">
                   #{entry.rank}
@@ -565,7 +620,8 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
                 Directions in OpenStreetMap ↗
               </a>
             </article>
-          ))}
+            );
+          })}
           {result.excluded.length > 0 && (
             <details className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
               <summary className="cursor-pointer text-sm font-medium text-slate-200">

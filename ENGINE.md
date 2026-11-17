@@ -375,6 +375,19 @@ the rows plus the room's new `decision_version`.
   re-enables publishing for the new result set. The server-side
   upsert makes repeat publishes safe regardless.
 
+The Routes map follows the search (v0.7.2): after a successful
+search the panel auto-previews the #1 result, and tapping any
+result card re-points the map at that place — the map header, route
+lines, and legend all follow the preview. A result that is already
+a room spot (a demo `mock/<spot-id>`, or a live place published
+earlier and matched by OSM id) selects that room spot; any other
+result previews a transient spot (`resolvePreviewTarget` in
+`src/engine/previewSpot.ts`) that exists only as local UI state: it
+is never added to room state, voted on, or sent to the server (its
+`preview/` id prefix never leaves the browser). Tapping a room spot
+card or any other map pin restores the room-spot preview. A failed
+or cancelled search never touches the preview.
+
 ## Validation, consent, and privacy (Step 1)
 
 - **Membership:** the runner must be a room member and every origin
