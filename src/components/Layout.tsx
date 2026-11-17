@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { motion, useAnimationControls } from 'framer-motion';
 import { Outlet, useLocation } from 'react-router-dom';
+import { ErrorBoundary } from './ErrorBoundary';
 import { Navbar } from './Navbar';
 
 export function Layout() {
@@ -33,7 +34,15 @@ export function Layout() {
         className="relative mx-auto w-full max-w-5xl flex-1 px-4 pb-16 pt-6 sm:px-6 sm:pt-8"
         style={{ paddingBottom: 'max(4rem, env(safe-area-inset-bottom))' }}
       >
-        <Outlet />
+        {/* Error boundary around the page outlet only: the navbar,
+            footer, and background survive a page crash, and the
+            boundary resets when the pathname changes (see
+            ErrorBoundary), so navigating away never traps the user
+            on the fallback. Deliberately NOT keyed: remounting the
+            page tree on navigation would lose unsaved state. */}
+        <ErrorBoundary resetKey={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </motion.main>
       <footer className="relative border-t border-white/10 py-4 text-center text-xs text-slate-400">
         MeetSync 3D · Maps: MapLibre + © OpenStreetMap contributors · Routes: OSRM (development) or demo estimates

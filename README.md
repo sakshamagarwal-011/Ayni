@@ -209,6 +209,7 @@ None material. Two clarifications, both documented where they occur:
 
 ## Version history
 
+- **v0.7.4** — Error-boundary safety net: a page that crashes while rendering shows a plain-words fallback with Reload / Back to home instead of a blank screen; the app shell survives and navigating to another route resets it.
 - **v0.7.3** — New live rooms start empty (no more seeded Bengaluru demo spots); the map reframes on participants + the selected spot when the selection changes, while "Fit all" still frames everything.
 - **v0.7.2** — The Routes map follows the search: the #1 result is auto-previewed and tapping any result previews it on the map.
 - **v0.7.1** — Shared published ranking: every participant sees published results in the same ranked order; re-publish supersedes the previous batch.

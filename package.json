@@ -16,6 +16,7 @@
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.4",
     "autoprefixer": "10.4.20",
+    "jsdom": "31.0.1",
     "postcss": "8.4.49",
     "tailwindcss": "3.4.15",
     "typescript": "5.6.3",
@@ -35,5 +36,5 @@
     "test:maps": "vitest run tests/unit/routing.test.ts tests/unit/mapConfig.test.ts tests/unit/geo.test.ts tests/unit/style.test.ts tests/unit/geolocation.test.ts"
   },
   "type": "module",
-  "version": "0.7.3"
+  "version": "0.7.4"
 }
