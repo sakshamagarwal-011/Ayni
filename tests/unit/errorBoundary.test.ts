@@ -149,6 +149,6 @@ describe('ErrorBoundary state transitions', () => {
     const err = new Error('boom');
     const info = { componentStack: 'stack' };
     boundary.componentDidCatch(err, info);
-    expect(spy).toHaveBeenCalledWith('MeetSync: a page failed to render.', err, info);
+    expect(spy).toHaveBeenCalledWith('Ayni: a page failed to render.', err, info);
   });
 });

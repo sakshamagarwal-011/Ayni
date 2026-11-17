@@ -171,7 +171,7 @@ export function getMapConfig(): MapConfig {
   cached = parseMapConfig(env);
   if (typeof import.meta.env?.DEV === 'boolean' && import.meta.env.DEV) {
     for (const warning of mapConfigWarnings(env)) {
-      console.warn(`[MeetSync map config] ${warning}`);
+      console.warn(`[Ayni map config] ${warning}`);
     }
   }
   return cached;

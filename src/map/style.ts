@@ -17,7 +17,7 @@ export const OPENFREEMAP_ATTRIBUTION = '© OpenMapTiles © OpenStreetMap contrib
 export function buildRasterFallbackStyle(tileUrl: string): StyleSpecification {
   return {
     version: 8,
-    name: 'MeetSync raster fallback (OpenStreetMap)',
+    name: 'Ayni raster fallback (OpenStreetMap)',
     sources: {
       osm: {
         type: 'raster',

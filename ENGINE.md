@@ -1,4 +1,4 @@
-# Optimization engine — MeetSync 3D
+# Optimization engine — Ayni
 
 The smart meeting-point engine ranks **real places** by **road travel
 time** for everyone in the room. It is open-source only: places come

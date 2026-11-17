@@ -47,7 +47,7 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    console.error('MeetSync: a page failed to render.', error, errorInfo);
+    console.error('Ayni: a page failed to render.', error, errorInfo);
   }
 
   render(): ReactNode {

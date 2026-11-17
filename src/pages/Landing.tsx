@@ -11,7 +11,7 @@ export function Landing() {
     <div className="space-y-10">
       <section className="pt-4 text-center sm:pt-8">
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
-          <p className="text-xs font-semibold uppercase tracking-widest text-violet-300">Group meeting point finder</p>
+          <p className="text-xs font-semibold uppercase tracking-widest text-violet-300">Ayni · A little from everyone</p>
           <h1 className="mx-auto mt-3 max-w-2xl text-4xl font-extrabold leading-tight text-white sm:text-5xl">
             Find the spot that works for{' '}
             <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">everyone</span>

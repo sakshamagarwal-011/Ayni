@@ -396,7 +396,7 @@ export function FinalNavigation() {
         </div>
         <p className="text-xs text-slate-400">
           These links open the spot location only — no starting point is shared. Your own row above has directions
-          from your location. The geo: link opens your device&apos;s maps app. MeetSync&apos;s maps and routing use
+          from your location. The geo: link opens your device&apos;s maps app. Ayni&apos;s maps and routing use
           MapLibre, OpenStreetMap, and OSRM — no paid maps provider and no API keys.
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">

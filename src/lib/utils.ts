@@ -52,7 +52,7 @@ export function hasSpotDetails(spot: { source: string }): boolean {
 
 /**
  * OpenStreetMap directions link, constructed only as an href from
- * coordinates. Clearly labelled as external in the UI. MeetSync uses
+ * coordinates. Clearly labelled as external in the UI. Ayni uses
  * MapLibre + OpenStreetMap + OSRM; no other maps provider is embedded
  * or linked.
  */

@@ -45,7 +45,7 @@ export function Layout() {
         </ErrorBoundary>
       </motion.main>
       <footer className="relative border-t border-white/10 py-4 text-center text-xs text-slate-400">
-        MeetSync 3D · Maps: MapLibre + © OpenStreetMap contributors · Routes: OSRM (development) or demo estimates
+        Ayni · A little from everyone · Maps: MapLibre + © OpenStreetMap contributors · Routes: OSRM (development) or demo estimates
       </footer>
     </div>
   );

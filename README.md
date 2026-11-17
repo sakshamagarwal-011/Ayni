@@ -1,6 +1,8 @@
-# MeetSync 3D
+# Ayni
 
-**Find the fairest place for everyone to meet.** Create a room, share one invite link, and MeetSync finds real meeting spots that balance everyone's travel time — then the group votes, the host locks it in, and everyone navigates to the same place.
+*A little from everyone.*
+
+**Find the fairest place for everyone to meet.** Create a room, share one invite link, and Ayni finds real meeting spots that balance everyone's travel time — then the group votes, the host locks it in, and everyone navigates to the same place.
 
 🌐 **Live app: [https://meetsync-roan.vercel.app](https://meetsync-roan.vercel.app)** — open it on your phone, create a room, and share the link. No install, no sign-up form: you just pick a name and a starting point.
 
@@ -209,6 +211,7 @@ None material. Two clarifications, both documented where they occur:
 
 ## Version history
 
+- **v0.8.0** — Rebrand: MeetSync 3D is now **Ayni** ("A little from everyone"). User-visible name, title, footer, landing header, and docs updated; internal identifiers, storage keys, and deployment URLs unchanged.
 - **v0.7.4** — Error-boundary safety net: a page that crashes while rendering shows a plain-words fallback with Reload / Back to home instead of a blank screen; the app shell survives and navigating to another route resets it.
 - **v0.7.3** — New live rooms start empty (no more seeded Bengaluru demo spots); the map reframes on participants + the selected spot when the selection changes, while "Fit all" still frames everything.
 - **v0.7.2** — The Routes map follows the search: the #1 result is auto-previewed and tapping any result previews it on the map.

@@ -23,7 +23,7 @@
     "vite": "5.4.11",
     "vitest": "2.1.8"
   },
-  "name": "meetsync-3d",
+  "name": "ayni",
   "private": true,
   "scripts": {
     "build": "tsc --noEmit && vite build",
@@ -36,5 +36,5 @@
     "test:maps": "vitest run tests/unit/routing.test.ts tests/unit/mapConfig.test.ts tests/unit/geo.test.ts tests/unit/style.test.ts tests/unit/geolocation.test.ts"
   },
   "type": "module",
-  "version": "0.7.4"
+  "version": "0.8.0"
 }

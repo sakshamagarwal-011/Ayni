@@ -1,4 +1,4 @@
-# Testing — MeetSync 3D
+# Testing — Ayni
 
 ## Verification status
 

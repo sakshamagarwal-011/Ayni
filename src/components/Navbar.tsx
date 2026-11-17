@@ -6,12 +6,12 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-navy-950/80 backdrop-blur-md">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
-        <Link to="/" className="flex items-center gap-2" aria-label="MeetSync 3D home">
+        <Link to="/" className="flex items-center gap-2" aria-label="Ayni home">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 text-lg font-bold text-white">
-            M
+            A
           </span>
           <span className="text-base font-bold tracking-tight text-white sm:text-lg">
-            MeetSync <span className="bg-gradient-to-r from-blue-400 to-violet-400 bg-clip-text text-transparent">3D</span>
+            Ayni
           </span>
         </Link>
         <nav className="flex items-center gap-1 sm:gap-2" aria-label="Primary">

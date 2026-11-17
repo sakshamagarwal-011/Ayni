@@ -1,4 +1,4 @@
-# Group coordination — MeetSync 3D
+# Group coordination — Ayni
 
 How voting, finalization, ETA/navigation, arrival, expiry, and reconnect work — the rules, where they are enforced, and what is still unverified live. This document describes the coordination layer delivered after Phases 1–4; the layout and screens were not changed (additive features only, inside existing containers).
 

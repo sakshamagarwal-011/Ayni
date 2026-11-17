@@ -1,4 +1,4 @@
-# Supabase setup — MeetSync 3D
+# Supabase setup — Ayni
 
 This guide takes you from an empty Supabase project to a working Live mode. Nothing here requires code changes: set the env vars, run the migrations, deploy the functions, and the app switches from Demo mode automatically.
 

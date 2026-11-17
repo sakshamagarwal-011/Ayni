@@ -1,4 +1,4 @@
-# Maps — MeetSync 3D Phase 3
+# Maps — Ayni Phase 3
 
 Phase 3 adds interactive maps with a free, open-source stack. **No paid
 maps provider, no API keys, and no billing are required for the default
