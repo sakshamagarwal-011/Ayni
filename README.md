@@ -1,3 +1,5 @@
+<img src="public/ayni-logo.png" alt="Ayni logo" width="240" />
+
 # Ayni
 
 *A little from everyone.*
@@ -211,6 +213,7 @@ None material. Two clarifications, both documented where they occur:
 
 ## Version history
 
+- **v0.8.1** — Brand logo: the wave-and-pin mark in the navbar, a favicon and touch icon for the browser tab, and the full logo at the top of this README.
 - **v0.8.0** — Rebrand: MeetSync 3D is now **Ayni** ("A little from everyone"). User-visible name, title, footer, landing header, and docs updated; internal identifiers, storage keys, and deployment URLs unchanged.
 - **v0.7.4** — Error-boundary safety net: a page that crashes while rendering shows a plain-words fallback with Reload / Back to home instead of a blank screen; the app shell survives and navigating to another route resets it.
 - **v0.7.3** — New live rooms start empty (no more seeded Bengaluru demo spots); the map reframes on participants + the selected spot when the selection changes, while "Fit all" still frames everything.

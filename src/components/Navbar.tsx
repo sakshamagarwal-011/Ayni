@@ -8,7 +8,7 @@ export function Navbar() {
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
         <Link to="/" className="flex items-center gap-2" aria-label="Ayni home">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 text-lg font-bold text-white">
-            A
+            <img src="/ayni-mark.png" alt="" className="h-full w-full rounded-xl object-cover" />
           </span>
           <span className="text-base font-bold tracking-tight text-white sm:text-lg">
             Ayni
