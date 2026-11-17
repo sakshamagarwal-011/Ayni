@@ -295,13 +295,16 @@ describe('optimization budgets + dedup + batching (mocked APIs)', () => {
       origins: [
         origin({ mode: 'car' }),
         origin({ participantId: 'p2', displayName: 'Priya', mode: 'walk' }),
-        origin({ participantId: 'p3', displayName: 'Rohan', mode: 'bike' }),
+        origin({ participantId: 'p3', displayName: 'Rohan', mode: 'scooter' }),
       ],
       maxCandidates: 1,
     });
     await runOptimization(mixed, liveDeps(osrm, overpass));
     const profiles = osrm.urls.map((u) => /\/route\/v1\/(\w+)\//.exec(u)?.[1]);
-    expect(profiles).toEqual(['bike', 'driving', 'foot']);
+    // Scooter shares the driving profile with car (no motorcycle
+    // profile on the demo server), so same-coord car+scooter origins
+    // dedup into one driving request; walk stays on foot.
+    expect(profiles).toEqual(['driving', 'foot']);
   });
 });
 

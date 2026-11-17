@@ -7,6 +7,8 @@ import type { RealtimeStatus, RoomDetail } from '../types';
  * burst of vote/location changes does not cause a refetch storm.
  */
 export const REALTIME_RELOAD_DEBOUNCE_MS = 300;
+/** Maximum time a refetch may be delayed by sustained event bursts. */
+export const REALTIME_RELOAD_MAX_WAIT_MS = 1000;
 
 export function useRoomDetail(code: string | undefined) {
   const [detail, setDetail] = useState<RoomDetail | null>(null);
@@ -14,8 +16,15 @@ export function useRoomDetail(code: string | undefined) {
   const [error, setError] = useState<string | null>(null);
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>('connecting');
   const [reloadKey, setReloadKey] = useState(0);
+  const [resubscribeKey, setResubscribeKey] = useState(0);
   const serviceRef = useRef(getRoomService());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debounceFirstRef = useRef<number | null>(null);
+  // Monotonic request ids: stale load responses must never overwrite
+  // newer ones when loads overlap (no cancellation in the services).
+  const requestIdRef = useRef(0);
+  const statusRef = useRef(realtimeStatus);
+  statusRef.current = realtimeStatus;
 
   const load = useCallback(async () => {
     if (!code) {
@@ -23,10 +32,12 @@ export function useRoomDetail(code: string | undefined) {
       setLoading(false);
       return;
     }
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     try {
       const found = await serviceRef.current.getRoomByCode(code);
+      if (requestId !== requestIdRef.current) return;
       if (!found) {
         setDetail(null);
         setError(`No meeting room found for invite code "${code}". It may have expired, or you may need to join first.`);
@@ -34,9 +45,10 @@ export function useRoomDetail(code: string | undefined) {
         setDetail(found);
       }
     } catch (e) {
+      if (requestId !== requestIdRef.current) return;
       setError(e instanceof Error ? e.message : 'Failed to load the room.');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [code]);
 
@@ -44,15 +56,22 @@ export function useRoomDetail(code: string | undefined) {
    * Background refetch for Realtime events / reconnects: updates the
    * room in place without flashing the loading skeleton, and keeps the
    * last good detail when the refetch fails (connection status is
-   * reported separately by the subscription).
+   * reported separately by the subscription). A definitive not-found
+   * (the room disappeared) IS surfaced, so a pruned room does not show
+   * stale detail forever.
    */
   const loadQuiet = useCallback(async () => {
     if (!code) return;
+    const requestId = ++requestIdRef.current;
     try {
       const found = await serviceRef.current.getRoomByCode(code);
+      if (requestId !== requestIdRef.current) return;
       if (found) {
         setDetail(found);
         setError(null);
+      } else {
+        setDetail(null);
+        setError(`No meeting room found for invite code "${code}". It may have expired, or you may need to join first.`);
       }
     } catch {
       // Keep showing the last good detail; the status banner + Retry
@@ -75,9 +94,22 @@ export function useRoomDetail(code: string | undefined) {
       return undefined;
     }
     const scheduleReload = () => {
+      // Trailing debounce with a max wait: under a sustained burst the
+      // refetch fires at most 1s after the first event instead of
+      // being starved indefinitely by re-arming the timer.
+      const nowMs = Date.now();
+      if (debounceFirstRef.current === null) debounceFirstRef.current = nowMs;
+      if (nowMs - debounceFirstRef.current >= REALTIME_RELOAD_MAX_WAIT_MS) {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+        debounceFirstRef.current = null;
+        void loadQuiet();
+        return;
+      }
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
         debounceRef.current = null;
+        debounceFirstRef.current = null;
         void loadQuiet();
       }, REALTIME_RELOAD_DEBOUNCE_MS);
     };
@@ -87,19 +119,26 @@ export function useRoomDetail(code: string | undefined) {
         clearTimeout(debounceRef.current);
         debounceRef.current = null;
       }
+      debounceFirstRef.current = null;
       unsubscribe();
     };
-  }, [detail?.room.id, loadQuiet]);
+  }, [detail?.room.id, loadQuiet, resubscribeKey]);
 
   // Reconnect/visibility: refetch quietly when the browser comes back
-  // online or the tab becomes visible again (no polling loops).
+  // online or the tab becomes visible again (no polling loops). When
+  // the live connection previously failed, ALSO resubscribe — a
+  // refetch alone never restores a dead channel.
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return undefined;
     const onOnline = () => {
+      if (statusRef.current === 'error') setResubscribeKey((k) => k + 1);
       void loadQuiet();
     };
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') void loadQuiet();
+      if (document.visibilityState === 'visible') {
+        if (statusRef.current === 'error') setResubscribeKey((k) => k + 1);
+        void loadQuiet();
+      }
     };
     window.addEventListener('online', onOnline);
     document.addEventListener('visibilitychange', onVisibility);
@@ -108,6 +147,30 @@ export function useRoomDetail(code: string | undefined) {
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [loadQuiet]);
+
+  // Expiry trigger: ONE timeout firing at the nearest upcoming expiry
+  // (a participant location or the room itself), refetching quietly so
+  // expired locations disappear from routes/ETAs without a reload and
+  // without polling. Rescheduled whenever the detail changes.
+  useEffect(() => {
+    if (!detail) return undefined;
+    const candidates: number[] = [];
+    const roomExpires = new Date(detail.room.expiresAt).getTime();
+    if (Number.isFinite(roomExpires)) candidates.push(roomExpires);
+    for (const p of detail.participants) {
+      if (!p.location) continue;
+      const locExpires = new Date(p.location.expiresAt).getTime();
+      if (Number.isFinite(locExpires)) candidates.push(locExpires);
+    }
+    const nowMs = Date.now();
+    const upcoming = candidates.filter((t) => t > nowMs).sort((a, b) => a - b)[0];
+    if (upcoming === undefined) return undefined;
+    const delayMs = Math.min(upcoming - nowMs + 250, 2_147_483_647);
+    const timer = setTimeout(() => {
+      void loadQuiet();
+    }, delayMs);
+    return () => clearTimeout(timer);
+  }, [detail, loadQuiet]);
 
   const reload = useCallback(() => setReloadKey((k) => k + 1), []);
 

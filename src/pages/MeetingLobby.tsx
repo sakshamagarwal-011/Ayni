@@ -5,10 +5,11 @@ import { PageSkeleton, Spinner } from '../components/LoadingSkeleton';
 import { ParticipantAvatar } from '../components/ParticipantAvatar';
 import { MapFallback } from '../components/map/MapFallback';
 import { ExpiredBanner, FinalizedBanner } from '../components/RoomBanners';
-import { arrivalLabel, arrivalSummary, isRoomExpired } from '../coordination';
+import { arrivalLabel, arrivalSummary, hasFreshLocation, isRoomExpired } from '../coordination';
+import { haversineDistanceM } from '../lib/distance';
 import { realtimeLabel, useRoomDetail } from '../lib/useRoomDetail';
 import { joinUrlForCode } from '../lib/utils';
-import { useGeolocation } from '../map/useGeolocation';
+import { assessGeolocationFix, useGeolocation } from '../map/useGeolocation';
 import { getRoomService, getServiceMode } from '../services';
 import type { Coordinates } from '../types';
 import { cn } from '../lib/utils';
@@ -24,7 +25,9 @@ export function MeetingLobby() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [pinEditing, setPinEditing] = useState(false);
   const [pinDraft, setPinDraft] = useState<Coordinates | null>(null);
+  const [pinPlaced, setPinPlaced] = useState(false);
   const [locSaving, setLocSaving] = useState(false);
+  const [gpsWarning, setGpsWarning] = useState<string | null>(null);
   const geo = useGeolocation();
 
   if (loading) return <PageSkeleton title="Meeting lobby" />;
@@ -32,7 +35,7 @@ export function MeetingLobby() {
     return (
       <div className="mx-auto max-w-xl space-y-4">
         <h1 className="text-2xl font-bold text-white">Meeting lobby</h1>
-        <ErrorBanner title="Room not found" message={error ?? 'Room not found.'} onRetry={reload} showJoinLink />
+        <ErrorBanner title="Room not found" message={error ?? 'Room not found.'} onRetry={reload} showJoinLink joinCode={code} />
       </div>
     );
   }
@@ -78,13 +81,17 @@ export function MeetingLobby() {
     }
     setLocSaving(true);
     setActionError(null);
+    setGpsWarning(null);
     try {
       const result = await geo.requestLocation();
+      const quality = assessGeolocationFix(result);
+      if (quality.warning) setGpsWarning(quality.warning);
       await getRoomService().updateLocation({
         roomId: room.id,
         lat: result.coords.lat,
         lng: result.coords.lng,
         label: 'Current location (GPS)',
+        accuracyM: result.accuracyM,
       });
       reload();
     } catch (e) {
@@ -95,27 +102,42 @@ export function MeetingLobby() {
   }
 
   function startPinEdit() {
-    setPinDraft(
-      current?.location
-        ? { lat: current.location.lat, lng: current.location.lng }
-        : (detail?.spots[0]?.location ?? { lat: 12.9716, lng: 77.6412 }),
-    );
+    // Users WITH a location start from their own pin (saving unchanged
+    // is harmless). Users WITHOUT one start with NO pin: defaulting to
+    // the first spot's coordinates let "save without moving" submit
+    // the spot's location as theirs.
+    if (current?.location) {
+      setPinDraft({ lat: current.location.lat, lng: current.location.lng });
+      setPinPlaced(true);
+    } else {
+      setPinDraft(null);
+      setPinPlaced(false);
+    }
     setPinEditing(true);
   }
 
+  function placePin(coords: Coordinates) {
+    setPinDraft(coords);
+    setPinPlaced(true);
+  }
+
   async function savePinLocation() {
-    if (!current || !pinDraft) return;
+    if (!current || !pinDraft || !pinPlaced) return;
     setLocSaving(true);
     setActionError(null);
     try {
+      // A pin moved far from the previous location leaves its old label
+      // behind: "Indiranagar" must not follow a pin dragged to Whitefield.
+      const moved = current.location ? haversineDistanceM(current.location, pinDraft) : 0;
       await getRoomService().updateLocation({
         roomId: room.id,
         lat: pinDraft.lat,
         lng: pinDraft.lng,
-        label: current.location?.label ?? 'Pinned location',
+        label: moved > 500 ? 'Pinned location' : (current.location?.label ?? 'Pinned location'),
       });
       setPinEditing(false);
       setPinDraft(null);
+      setPinPlaced(false);
       reload();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Failed to update your location.');
@@ -178,29 +200,41 @@ export function MeetingLobby() {
           <EmptyState title="No participants yet" description="Share the invite link to bring friends in." />
         ) : (
           <ul className="space-y-2">
-            {participants.map((p) => (
-              <li key={p.id} className="glass-card flex items-center gap-3 px-4 py-3">
-                <ParticipantAvatar name={p.displayName} color={p.avatarColor} isReady={p.isReady} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-white">
-                    {p.displayName}
-                    {p.isHost && <span className="ml-2 rounded-full bg-violet-500/20 px-2 py-0.5 text-[11px] text-violet-200">Host</span>}
-                    {p.id === currentParticipantId && <span className="ml-2 text-xs text-slate-400">(you)</span>}
-                  </p>
-                  <p className="truncate text-xs text-slate-400">
-                    {p.location ? `${p.location.label} · location expires ${new Date(p.location.expiresAt).toLocaleTimeString()}` : 'No location yet'}
-                  </p>
-                </div>
-                <span className={cn('shrink-0 rounded-full px-2.5 py-1 text-xs font-medium', p.isReady ? 'bg-emerald-500/15 text-emerald-200' : 'bg-white/10 text-slate-300')}>
-                  {p.isReady ? 'Ready' : 'Not ready'}
-                </span>
-                {room.status === 'finalized' && (
-                  <span className={cn('shrink-0 rounded-full px-2.5 py-1 text-xs font-medium', p.arrivedAt ? 'bg-emerald-500/15 text-emerald-200' : 'bg-white/10 text-slate-300')}>
-                    {arrivalLabel(p)}
+            {participants.map((p) => {
+              const expiredLocation = Boolean(p.location) && !hasFreshLocation(p);
+              return (
+                <li key={p.id} className="glass-card flex items-center gap-3 px-4 py-3">
+                  <ParticipantAvatar name={p.displayName} color={p.avatarColor} isReady={p.isReady} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-white">
+                      {p.displayName}
+                      {p.isHost && <span className="ml-2 rounded-full bg-violet-500/20 px-2 py-0.5 text-[11px] text-violet-200">Host</span>}
+                      {p.id === currentParticipantId && <span className="ml-2 text-xs text-slate-400">(you)</span>}
+                    </p>
+                    <p className="truncate text-xs text-slate-400">
+                      {p.location
+                        ? expiredLocation
+                          ? `${p.location.label} · Location expired — needs a refresh.`
+                          : `${p.location.label} · location expires ${new Date(p.location.expiresAt).toLocaleString(undefined, {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            })}`
+                        : 'No location yet'}
+                    </p>
+                  </div>
+                  <span className={cn('shrink-0 rounded-full px-2.5 py-1 text-xs font-medium', p.isReady ? 'bg-emerald-500/15 text-emerald-200' : 'bg-white/10 text-slate-300')}>
+                    {p.isReady ? 'Ready' : 'Not ready'}
                   </span>
-                )}
-              </li>
-            ))}
+                  {room.status === 'finalized' && (
+                    <span className={cn('shrink-0 rounded-full px-2.5 py-1 text-xs font-medium', p.arrivedAt ? 'bg-emerald-500/15 text-emerald-200' : 'bg-white/10 text-slate-300')}>
+                      {arrivalLabel(p)}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
@@ -223,8 +257,8 @@ export function MeetingLobby() {
             spots={detail.spots}
             pinLocation={pinEditing ? pinDraft : null}
             pinDraggable={pinEditing}
-            onMapClick={pinEditing ? (coords) => setPinDraft(coords) : undefined}
-            onPinChange={pinEditing ? (coords) => setPinDraft(coords) : undefined}
+            onMapClick={pinEditing ? placePin : undefined}
+            onPinChange={pinEditing ? placePin : undefined}
             fitKey={`lobby-${room.id}`}
             ariaLabel="Map of participants and meeting spots"
           />
@@ -255,7 +289,7 @@ export function MeetingLobby() {
               </>
             ) : (
               <>
-                <button type="button" onClick={savePinLocation} disabled={locSaving || !pinDraft} className="btn-primary !px-4 !py-2 text-xs">
+                <button type="button" onClick={savePinLocation} disabled={locSaving || !pinPlaced} className="btn-primary !px-4 !py-2 text-xs">
                   {locSaving ? <Spinner label="Saving" /> : 'Save pinned location'}
                 </button>
                 <button
@@ -263,6 +297,7 @@ export function MeetingLobby() {
                   onClick={() => {
                     setPinEditing(false);
                     setPinDraft(null);
+                    setPinPlaced(false);
                   }}
                   disabled={locSaving}
                   className="btn-secondary !px-4 !py-2 text-xs"
@@ -278,6 +313,14 @@ export function MeetingLobby() {
         {pinEditing && pinDraft && (
           <p className="mt-2 text-xs text-slate-300">
             Pin: {pinDraft.lat.toFixed(4)}, {pinDraft.lng.toFixed(4)} — drag the pin or tap the map, then save.
+          </p>
+        )}
+        {pinEditing && !pinDraft && (
+          <p className="mt-2 text-xs text-slate-300">Tap the map to place your pin first — nothing is saved until you place it.</p>
+        )}
+        {gpsWarning && (
+          <p role="status" className="mt-2 text-xs text-amber-200">
+            {gpsWarning}
           </p>
         )}
       </section>

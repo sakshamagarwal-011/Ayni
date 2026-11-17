@@ -3,6 +3,7 @@ import {
   CATEGORY_TAGS,
   MAX_OVERPASS_RESULTS,
   buildOverpassQuery,
+  categoryLabelForTags,
   deduplicatePlaces,
   parseOverpassResponse,
 } from '../../src/engine/places';
@@ -14,10 +15,17 @@ describe('buildOverpassQuery', () => {
   it('builds node/way/relation clauses with around + timeout + center output', () => {
     const ql = buildOverpassQuery(AREA, 'cafe', 30);
     expect(ql).toContain('[out:json][timeout:25]');
-    expect(ql).toContain('node["amenity"="cafe"](around:5000,12.97160,77.64120);');
-    expect(ql).toContain('way["amenity"="cafe"](around:5000,12.97160,77.64120);');
-    expect(ql).toContain('relation["amenity"="cafe"](around:5000,12.97160,77.64120);');
+    // ["name"] keeps unnamed results out of the capped result set.
+    expect(ql).toContain('node["amenity"="cafe"]["name"](around:5000,12.97160,77.64120);');
+    expect(ql).toContain('way["amenity"="cafe"]["name"](around:5000,12.97160,77.64120);');
+    expect(ql).toContain('relation["amenity"="cafe"]["name"](around:5000,12.97160,77.64120);');
     expect(ql).toContain('out center 30;');
+  });
+
+  it('derives the QL timeout from the caller timeout and clamps it', () => {
+    expect(buildOverpassQuery(AREA, 'cafe', 30, 60)).toContain('[out:json][timeout:60]');
+    expect(buildOverpassQuery(AREA, 'cafe', 30, 1)).toContain('[out:json][timeout:5]');
+    expect(buildOverpassQuery(AREA, 'cafe', 30, 999)).toContain('[out:json][timeout:180]');
   });
 
   it('includes every filter for bar (bar + pub) and any', () => {
@@ -28,6 +36,29 @@ describe('buildOverpassQuery', () => {
     for (const filter of CATEGORY_TAGS.any) expect(any).toContain(filter);
   });
 
+  it('covers the India-first categories with correct OSM tags, all included in any', () => {
+    expect(CATEGORY_TAGS.mall).toEqual(['["shop"="mall"]']);
+    expect(CATEGORY_TAGS.metroStation).toEqual([
+      '["railway"="station"]["station"="subway"]',
+      '["railway"="station"]["station"="light_rail"]',
+    ]);
+    expect(CATEGORY_TAGS.railwayStation).toEqual(['["railway"="station"]']);
+    expect(CATEGORY_TAGS.marketplace).toEqual(['["amenity"="marketplace"]']);
+    expect(CATEGORY_TAGS.teaStall).toEqual([
+      '["amenity"="cafe"]["cuisine"="tea"]',
+      '["amenity"="fast_food"]["cuisine"="tea"]',
+    ]);
+    // 'any' is the union of every category's filters.
+    const union = new Set<string>();
+    for (const [key, filters] of Object.entries(CATEGORY_TAGS)) {
+      if (key === 'any') continue;
+      for (const f of filters) union.add(f);
+    }
+    expect(new Set(CATEGORY_TAGS.any)).toEqual(union);
+    expect(buildOverpassQuery(AREA, 'metroStation', 10)).toContain('["station"="subway"]');
+    expect(buildOverpassQuery(AREA, 'teaStall', 10)).toContain('["cuisine"="tea"]');
+  });
+
   it('clamps the result limit to [1, 50]', () => {
     expect(buildOverpassQuery(AREA, 'cafe', 999)).toContain(`out center ${MAX_OVERPASS_RESULTS};`);
     expect(buildOverpassQuery(AREA, 'cafe', 0)).toContain('out center 1;');
@@ -35,6 +66,20 @@ describe('buildOverpassQuery', () => {
 
   it('converts radius to metres', () => {
     expect(buildOverpassQuery({ ...AREA, radiusKm: 2.5 }, 'park', 10)).toContain('around:2500,');
+  });
+});
+
+describe('categoryLabelForTags', () => {
+  it('labels the India-first categories', () => {
+    expect(categoryLabelForTags({ shop: 'mall' })).toBe('Mall');
+    expect(categoryLabelForTags({ railway: 'station', station: 'subway' })).toBe('Metro station');
+    expect(categoryLabelForTags({ railway: 'station', station: 'light_rail' })).toBe('Metro station');
+    expect(categoryLabelForTags({ railway: 'station' })).toBe('Railway station');
+    expect(categoryLabelForTags({ amenity: 'marketplace' })).toBe('Marketplace');
+    expect(categoryLabelForTags({ amenity: 'cafe', cuisine: 'tea' })).toBe('Tea stall');
+    expect(categoryLabelForTags({ amenity: 'fast_food', cuisine: 'tea' })).toBe('Tea stall');
+    // A plain café is not a tea stall.
+    expect(categoryLabelForTags({ amenity: 'cafe' })).toBe('Café');
   });
 });
 

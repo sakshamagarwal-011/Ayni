@@ -15,8 +15,8 @@ import {
   createDemoEngineRoutingAdapter,
   createMockPlacesClient,
   createOsrmEngineRoutingAdapter,
-  createOverpassClient,
   getEngineConfig,
+  getSharedOverpassClient,
   resolveEngineMode,
   runOptimization,
   type CandidatePlace,
@@ -84,6 +84,13 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
 
   // Optimization runs are blocked once the room is finalized or
   // expired — the decision is already made (or gone).
+  // Members without a location cannot be routed: one missing location
+  // used to block the whole-room search. The search now scopes its
+  // required set to members WITH locations and warns about the rest.
+  const membersWithoutLocation = useMemo(
+    () => detail.participants.filter((p) => !p.location),
+    [detail.participants],
+  );
   const optimizeCheck = isActionAllowed(detail.room.status, 'optimize', {
     isExpired: isRoomExpired(detail.room),
     // Membership is the current participant's presence in the room. Omitting
@@ -153,7 +160,9 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
           decisionVersion: detail.room.decisionVersion,
           currentParticipantId: currentId,
           memberParticipantIds: detail.participants.map((p) => p.id),
-          requiredParticipantIds: detail.participants.map((p) => p.id),
+          // Only members WITH locations are required: a location-less
+          // member must not block the whole-room search.
+          requiredParticipantIds: origins.map((o) => o.participantId),
           origins,
           category,
           meetingTimeISO,
@@ -163,7 +172,7 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
         },
         {
           placesClient: live
-            ? createOverpassClient({ baseUrl: engineConfig.overpassUrl, timeoutMs: engineConfig.overpassTimeoutMs })
+            ? getSharedOverpassClient({ baseUrl: engineConfig.overpassUrl, timeoutMs: engineConfig.overpassTimeoutMs })
             : createMockPlacesClient(demoPlaces),
           routingClient: live
             ? createOsrmEngineRoutingAdapter(getDefaultRoutingClient())
@@ -207,7 +216,10 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
       if (err instanceof EngineError) setError(err.userMessage);
       else setError(err instanceof Error ? err.message : 'The search failed. Try again.');
     } finally {
-      if (!controller.signal.aborted) setRunning(false);
+      // Clear the running state whenever THIS search is still the
+      // current one — including when the user cancelled it. The old
+      // "skip when aborted" guard stranded the button on "Searching…".
+      if (abortRef.current === controller) setRunning(false);
     }
   }
 
@@ -309,14 +321,27 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
       </label>
 
       <div>
-        <button
-          type="button"
-          onClick={() => void runSearch()}
-          disabled={running || resolved.mode === 'disabled' || !optimizeCheck.allowed}
-          className="btn-primary"
-        >
-          {running ? 'Searching…' : 'Find best meeting points'}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void runSearch()}
+            disabled={running || resolved.mode === 'disabled' || !optimizeCheck.allowed}
+            className="btn-primary"
+          >
+            {running ? 'Searching…' : 'Find best meeting points'}
+          </button>
+          {running && (
+            <button type="button" onClick={() => abortRef.current?.abort()} className="btn-secondary">
+              Cancel search
+            </button>
+          )}
+        </div>
+        {membersWithoutLocation.length > 0 && (
+          <p className="mt-2 text-xs text-amber-200" role="status">
+            Searching without {membersWithoutLocation.map((p) => p.displayName).join(', ')}: no location in this room,
+            so their travel time is not included. Ask them to share a location and re-run for a fair result.
+          </p>
+        )}
         {!optimizeCheck.allowed && (
           <p className="mt-2 text-xs text-slate-400" role="status">
             {optimizeCheck.reason}
@@ -344,7 +369,11 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
           <p className="text-sm text-slate-300">
             {result.provider === 'osrm' ? 'Live results' : 'Demo results'} · {result.stats.discovered} places found,{' '}
             {result.stats.considered} routed, {result.ranked.length} ranked
-            {result.excluded.length > 0 ? `, ${result.excluded.length} excluded` : ''}.
+            {result.excluded.length > 0 ? `, ${result.excluded.length} excluded` : ''}
+            {result.stats.routeFailures > 0
+              ? `, ${result.stats.routeFailures} route request${result.stats.routeFailures === 1 ? '' : 's'} failed`
+              : ''}
+            .
           </p>
           {result.warnings.map((w) => (
             <p key={w} className="text-xs text-amber-200">
@@ -353,7 +382,9 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
           ))}
           {result.ranked.length === 0 && (
             <p className="text-sm text-slate-300">
-              No places passed the filters. Try removing the max-travel limit or choosing a different category.
+              {result.stats.routeFailures > 0
+                ? 'No places could be ranked because routing requests failed. Check your connection and try the search again — this is not a filter problem.'
+                : 'No places passed the filters. Try removing the max-travel limit or choosing a different category.'}
             </p>
           )}
           {result.ranked.map((entry) => (

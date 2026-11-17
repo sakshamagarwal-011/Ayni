@@ -72,14 +72,17 @@ describe('validateOptimizationInput', () => {
     expect(issues.join(' ')).toMatch(/consent/);
   });
 
-  it('allows missing consent for optional origins', () => {
+  it('rejects missing consent for optional origins too', () => {
+    // Every origin feeds search areas + OSRM routing, so consent is
+    // required for all origins, not just required ones (M-17).
     const issues = validateOptimizationInput(
       input({
         origins: [origin(), origin({ participantId: 'p2', displayName: 'Priya', required: false, consentGiven: false })],
       }),
       NOW,
     );
-    expect(issues).toEqual([]);
+    expect(issues.join(' ')).toMatch(/Priya/);
+    expect(issues.join(' ')).toMatch(/consent/);
   });
 
   it('rejects invalid coordinates', () => {
@@ -103,7 +106,35 @@ describe('validateOptimizationInput', () => {
 
   it('rejects a required participant with no origin', () => {
     const issues = validateOptimizationInput(input({ origins: [origin()] }), NOW);
-    expect(issues.join(' ')).toMatch(/no location/);
+    expect(issues.join(' ')).toMatch(/No location in this search for: p2/);
+  });
+
+  it('names every participant missing a location, not just the first', () => {
+    const issues = validateOptimizationInput(input({ origins: [] }), NOW);
+    expect(issues.join(' ')).toMatch(/No location in this search for: p1, p2/);
+  });
+
+  it('rejects an unknown origin travel mode', () => {
+    const issues = validateOptimizationInput(
+      input({ origins: [origin({ mode: 'teleport' as never }), origin({ participantId: 'p2' })] }),
+      NOW,
+    );
+    expect(issues.join(' ')).toMatch(/travel mode/);
+  });
+
+  it('does not throw on nullish inputs', () => {
+    expect(() =>
+      validateOptimizationInput(
+        input({ roomId: null as never, origins: null as never, memberParticipantIds: null as never }),
+        NOW,
+      ),
+    ).not.toThrow();
+    const issues = validateOptimizationInput(
+      input({ roomId: null as never, origins: null as never, memberParticipantIds: null as never }),
+      NOW,
+    );
+    expect(issues.length).toBeGreaterThan(0);
+    expect(() => optimizationWarnings(null as never, NOW)).not.toThrow();
   });
 
   it('rejects finalized and expired meetings', () => {

@@ -8,6 +8,7 @@ import { SpotCard } from '../components/SpotCard';
 import type { MapRouteLine } from '../components/map/MeetingMap';
 import { MapFallback } from '../components/map/MapFallback';
 import { RouteLegend, type LegendRoute } from '../components/map/RouteLegend';
+import { hasFreshLocation } from '../coordination';
 import { MODE_LABELS, TRAVEL_MODES, spotScore } from '../lib/distance';
 import { useRoomDetail } from '../lib/useRoomDetail';
 import { formatDistance, formatDuration } from '../lib/utils';
@@ -28,6 +29,7 @@ export function RouteDiscovery() {
   const [estimatesLoading, setEstimatesLoading] = useState(false);
   const [estimatesError, setEstimatesError] = useState<string | null>(null);
   const [selectedSpotId, setSelectedSpotId] = useState<string | null>(null);
+  const [selectionLatched, setSelectionLatched] = useState(false);
 
   const rankedSpots = useMemo(
     () =>
@@ -36,7 +38,17 @@ export function RouteDiscovery() {
         : [],
     [detail, estimates, mode],
   );
-  const selectedSpot = rankedSpots.find((s) => s.id === selectedSpotId) ?? rankedSpots[0] ?? null;
+  // Latch the selection on first load: the derived `?? rankedSpots[0]`
+  // fallback re-ran on every render, silently switching the selected
+  // spot on travel-mode changes and estimate loads.
+  useEffect(() => {
+    if (!selectionLatched && rankedSpots.length > 0 && selectedSpotId === null) {
+      setSelectedSpotId(rankedSpots[0].id);
+      setSelectionLatched(true);
+    }
+  }, [rankedSpots, selectedSpotId, selectionLatched]);
+  const selectedSpot =
+    rankedSpots.find((s) => s.id === selectedSpotId) ?? (selectionLatched ? null : (rankedSpots[0] ?? null));
   const liveRoutes = useMapRoutes(detail?.participants ?? [], selectedSpot, mode, detail?.room.id ?? '');
   const liveByParticipant = useMemo(
     () => new globalThis.Map(liveRoutes.routes.map((r) => [r.participantId, r.geometry])),
@@ -105,10 +117,15 @@ export function RouteDiscovery() {
     return (
       <div className="mx-auto max-w-xl space-y-4">
         <h1 className="text-2xl font-bold text-white">Route discovery</h1>
-        <ErrorBanner title="Room not found" message={error ?? 'Room not found.'} onRetry={reload} showJoinLink />
+        <ErrorBanner title="Room not found" message={error ?? 'Room not found.'} onRetry={reload} showJoinLink joinCode={code} />
       </div>
     );
   }
+
+  // Skeleton only until the FIRST estimates arrive: background refetches
+  // (every Realtime update) must keep the existing cards on screen
+  // instead of blanking them into a skeleton + replayed animations.
+  const showEstimatesSkeleton = estimatesLoading && estimates.length === 0;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -173,7 +190,7 @@ export function RouteDiscovery() {
         />
       </section>
 
-      {estimatesLoading && <PageSkeleton title="Route estimates" />}
+      {showEstimatesSkeleton && <PageSkeleton title="Route estimates" />}
 
       {!estimatesLoading && detail.spots.length === 0 && (
         <EmptyState title="No meeting spots yet" description="Spots are added when the room is created. Reload to check again.">
@@ -181,21 +198,28 @@ export function RouteDiscovery() {
         </EmptyState>
       )}
 
-      {!estimatesLoading && rankedSpots.length > 0 && (
+      {!showEstimatesSkeleton && rankedSpots.length > 0 && (
         <div className="space-y-3">
           {rankedSpots.map((spot, i) => {
             const isSelected = spot.id === selectedSpot?.id;
             const rows = detail.participants.map((p) => {
               const estimate = estimates.find((e) => e.spotId === spot.id && e.participantId === p.id && e.mode === mode);
               const live = isSelected ? liveByParticipant.get(p.id) : undefined;
+              // Expired locations show no travel time here either: the
+              // estimate builders already exclude them, but a live route
+              // from an earlier fresh fetch must not linger on the row.
+              const fresh = hasFreshLocation(p);
               return {
                 participant: p,
+                expired: Boolean(p.location) && !fresh,
                 // Selected spot: prefer live (OSRM/demo) route values; other spots keep estimates.
-                shown: live
-                  ? { distanceM: live.distanceM, durationMin: live.durationMin }
-                  : estimate
-                    ? { distanceM: estimate.distanceM, durationMin: estimate.durationMin }
-                    : null,
+                shown: !fresh
+                  ? null
+                  : live
+                    ? { distanceM: live.distanceM, durationMin: live.durationMin }
+                    : estimate
+                      ? { distanceM: estimate.distanceM, durationMin: estimate.durationMin }
+                      : null,
               };
             });
             const withEstimates = rows.filter((r) => r.shown);
@@ -212,15 +236,20 @@ export function RouteDiscovery() {
                 footer={
                   <div>
                     <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-                      By {MODE_LABELS[mode].toLowerCase()} · longest trip {formatDuration(maxMin)}
+                      By {MODE_LABELS[mode].toLowerCase()}
+                      {withEstimates.length > 0 ? ` · longest trip ${formatDuration(maxMin)}` : ''}
                       {isSelected && liveByParticipant.size > 0 ? ` · ${describeRouteSource(liveRoutes.source, anyTransitApprox)}` : ''}
                     </p>
                     <ul className="space-y-1.5">
-                      {rows.map(({ participant, shown }) => (
+                      {rows.map(({ participant, shown, expired }) => (
                         <li key={participant.id} className="flex items-center justify-between gap-3 text-sm">
                           <span className="text-slate-200">{participant.displayName}</span>
                           <span className="text-slate-300">
-                            {shown ? `${formatDistance(shown.distanceM)} · ${formatDuration(shown.durationMin)}` : 'No location'}
+                            {shown
+                              ? `${formatDistance(shown.distanceM)} · ${formatDuration(shown.durationMin)}`
+                              : expired
+                                ? 'Location expired'
+                                : 'No location'}
                           </span>
                         </li>
                       ))}

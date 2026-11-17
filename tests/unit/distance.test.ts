@@ -56,9 +56,12 @@ describe('haversine distance', () => {
 });
 
 describe('route estimates', () => {
-  it('walk is slower than car for the same distance', () => {
+  it('walk is slower than scooter and car for the same distance', () => {
+    expect(estimateDurationMin(5000, 'walk')).toBeGreaterThan(estimateDurationMin(5000, 'scooter'));
     expect(estimateDurationMin(5000, 'walk')).toBeGreaterThan(estimateDurationMin(5000, 'car'));
-    expect(estimateDurationMin(5000, 'bike')).toBeGreaterThan(estimateDurationMin(5000, 'car'));
+    // Scooter and car share the 25 km/h urban speed, but car carries a
+    // +5 min overhead, so scooter estimates slightly faster.
+    expect(estimateDurationMin(5000, 'scooter')).toBeLessThan(estimateDurationMin(5000, 'car'));
   });
 
   it('returns at least 1 minute and grows with distance', () => {
@@ -80,6 +83,19 @@ describe('route estimates', () => {
     const p = participantWithLocation(12, 77);
     p.location = null;
     expect(buildRouteEstimate('room-1', p, MOCK_SPOTS[0], 'car')).toBeNull();
+  });
+
+  it('returns null for an expired location and skips it in bulk builds', () => {
+    const now = new Date('2026-11-17T18:00:00.000Z');
+    const expired = participantWithLocation(INDIRANAGAR.lat, INDIRANAGAR.lng);
+    expired.location!.expiresAt = '2026-11-17T17:00:00.000Z';
+    expect(buildRouteEstimate('room-1', expired, MOCK_SPOTS[0], 'car', now)).toBeNull();
+    const fresh = participantWithLocation(KORAMANGALA.lat, KORAMANGALA.lng);
+    fresh.location!.expiresAt = '2026-11-17T19:00:00.000Z';
+    const estimates = buildAllRouteEstimates('room-1', [expired, fresh], [MOCK_SPOTS[0]], now);
+    // Only the fresh participant contributes (1 spot x 4 modes).
+    expect(estimates).toHaveLength(4);
+    expect(estimates.every((e) => e.participantId === fresh.id)).toBe(true);
   });
 
   it('builds estimates for every participant x spot x mode', () => {

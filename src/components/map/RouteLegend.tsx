@@ -68,13 +68,15 @@ export function RouteLegend({
         </ul>
       )}
       <p className="mt-3 text-xs text-slate-400">
-        {hasOsrm
-          ? 'Road routes from OSRM (public development server — low volume only, no uptime guarantee). See MAPS.md for limits.'
-          : hasFallback
-            ? 'Some routes fell back to straight-line estimates because OSRM was unavailable. Distances are approximate.'
-            : allMock
-              ? 'Demo estimates use straight-line distance × 1.3 with average mode speeds — not road routes, no live traffic.'
-              : 'Routes are estimates only — check live conditions before you leave.'}
+        {hasOsrm && hasFallback
+          ? 'Some routes are OSRM road routes and some fell back to straight-line estimates because OSRM was unavailable for them. Per-route labels above show which is which.'
+          : hasOsrm
+            ? 'Road routes from OSRM (public development server — low volume only, no uptime guarantee). See MAPS.md for limits.'
+            : hasFallback
+              ? 'Some routes fell back to straight-line estimates because OSRM was unavailable. Distances are approximate.'
+              : allMock
+                ? 'Demo estimates use straight-line distance × 1.3 with average mode speeds — not road routes, no live traffic.'
+                : 'Routes are estimates only — check live conditions before you leave.'}
       </p>
     </div>
   );

@@ -50,6 +50,9 @@ describe('isRoomExpired', () => {
   it('is true when expiresAt has passed', () => {
     expect(isRoomExpired(room('lobby', '2026-11-17T17:59:59.000Z'), NOW)).toBe(true);
   });
+  it('is false at the exact expiry instant (strict <, matching the server)', () => {
+    expect(isRoomExpired(room('lobby', '2026-11-17T18:00:00.000Z'), NOW)).toBe(false);
+  });
   it('is true when the status is expired even if expiresAt is in the future', () => {
     expect(isRoomExpired(room('expired', '2026-11-17T19:00:00.000Z'), NOW)).toBe(true);
   });

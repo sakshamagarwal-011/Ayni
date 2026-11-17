@@ -20,7 +20,12 @@ export function isRoomExpired(
   if (room.status === 'expired') return true;
   if (room.status === 'finalized') return false;
   const expiresMs = new Date(room.expiresAt).getTime();
-  return Number.isFinite(expiresMs) && expiresMs <= now.getTime();
+  // Strict `<`, matching the server-side checks (Edge Functions use
+  // `expires_at < now()`). The previous `<=` differed by 1ms at the
+  // exact expiry instant. All client expiry still uses the device
+  // clock: there is no server-time source available client-side
+  // without a dedicated endpoint, so clock skew is not corrected.
+  return Number.isFinite(expiresMs) && expiresMs < now.getTime();
 }
 
 export interface ExpiryInfo {

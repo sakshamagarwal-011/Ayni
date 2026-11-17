@@ -36,7 +36,9 @@ export function SpotComparison() {
   const [ranking, setRanking] = useState<string[]>([]);
   const [votes, setVotes] = useState<Vote[]>([]);
   const [votesLoaded, setVotesLoaded] = useState(false);
+  const [votesError, setVotesError] = useState<string | null>(null);
   const [estimates, setEstimates] = useState<RouteEstimate[]>([]);
+  const [estimatesError, setEstimatesError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -56,11 +58,17 @@ export function SpotComparison() {
       .then((rows) => {
         if (!cancelled) {
           setVotes(rows);
+          setVotesError(null);
           setVotesLoaded(true);
         }
       })
-      .catch(() => {
-        if (!cancelled) setVotesLoaded(true);
+      .catch((e) => {
+        // A failed load must surface — silently treating it as "no
+        // votes" zeroed the tally and overwrote the real ranking.
+        if (!cancelled) {
+          setVotesError(e instanceof Error ? e.message : 'Failed to load votes.');
+          setVotesLoaded(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -73,9 +81,14 @@ export function SpotComparison() {
     getRoomService()
       .getRouteEstimates(detail.room.id)
       .then((rows) => {
-        if (!cancelled) setEstimates(rows);
+        if (!cancelled) {
+          setEstimates(rows);
+          setEstimatesError(null);
+        }
       })
-      .catch(() => undefined);
+      .catch((e) => {
+        if (!cancelled) setEstimatesError(e instanceof Error ? e.message : 'Failed to load travel estimates.');
+      });
     return () => {
       cancelled = true;
     };
@@ -98,15 +111,17 @@ export function SpotComparison() {
   // Initialize the ranking once per room + participant: the saved
   // ranking when the participant already voted, else the compared
   // order. Later Realtime vote updates never reset an in-progress edit.
+  // Never initialize from a FAILED load: an empty vote set from an
+  // error is not "no votes" and must not overwrite the real ranking.
   useEffect(() => {
-    if (!detail || !votesLoaded) return;
+    if (!detail || !votesLoaded || votesError) return;
     const key = `${detail.room.id}:${detail.currentParticipantId ?? 'none'}`;
     if (rankingInitKeyRef.current === key) return;
     rankingInitKeyRef.current = key;
     const savedRanking =
       detail.currentParticipantId != null ? ownRanking(votes, detail.currentParticipantId, comparedIds) : null;
     setRanking(savedRanking ?? [...comparedIds]);
-  }, [detail, votes, votesLoaded, comparedIds]);
+  }, [detail, votes, votesLoaded, votesError, comparedIds]);
 
   const tally = useMemo(
     () => tallyVotes(votes, comparedIds),
@@ -126,7 +141,7 @@ export function SpotComparison() {
     return (
       <div className="mx-auto max-w-xl space-y-4">
         <h1 className="text-2xl font-bold text-white">Spot comparison</h1>
-        <ErrorBanner title="Room not found" message={error ?? 'Room not found.'} onRetry={reload} showJoinLink />
+        <ErrorBanner title="Room not found" message={error ?? 'Room not found.'} onRetry={reload} showJoinLink joinCode={code} />
       </div>
     );
   }
@@ -247,6 +262,22 @@ export function SpotComparison() {
       <RealtimeStatusBanner status={realtimeStatus} onRetry={reload} />
 
       {actionError && <ErrorBanner message={actionError} />}
+      {votesError && (
+        <ErrorBanner
+          title="Votes could not be loaded"
+          message={`${votesError} The tally below may be incomplete — retry before voting.`}
+          onRetry={reload}
+          retryLabel="Retry loading votes"
+        />
+      )}
+      {estimatesError && (
+        <ErrorBanner
+          title="Travel estimates could not be loaded"
+          message={`${estimatesError} Longest-trip times are unavailable.`}
+          onRetry={reload}
+          retryLabel="Retry loading estimates"
+        />
+      )}
       {notice && (
         <div role="status" className="glass-card border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-100">
           {notice}

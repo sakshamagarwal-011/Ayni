@@ -1,0 +1,18 @@
+# MeetSync 3D — Supabase project configuration.
+#
+# Only function-level JWT verification is configured here. All other
+# settings use Supabase defaults (local `supabase start` is not used
+# for this project — the cloud project is the source of truth).
+
+# SECURITY-REVIEW: cleanup-expired-locations is invoked by a scheduled
+# job (Supabase Scheduled Function / pg_cron HTTP call), NOT by a
+# signed-in user, so it cannot present a user JWT. verify_jwt = false
+# disables the platform JWT check for this function ONLY.
+#
+# Auth is NOT disabled: the function itself requires the
+# `x-cron-secret` header to match the CLEANUP_SECRET Edge Function
+# secret (constant-time comparison), and rejects every request
+# without it. Do NOT remove that check. The other four functions keep
+# the default verify_jwt = true (user JWT required).
+[functions.cleanup-expired-locations]
+verify_jwt = false

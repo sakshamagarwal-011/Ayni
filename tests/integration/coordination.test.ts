@@ -30,9 +30,14 @@ const STORE_KEY = 'meetsync-demo-rooms-v1';
 const CURRENT_KEY = 'meetsync-demo-current-v1';
 
 async function setup() {
+  // One shared room store, but a SEPARATE identity store per simulated
+  // browser: demo identity is per-browser (M-3), so sharing one
+  // identity map would make the guest's join rejoin as the host.
   const storage = createMemoryMockStorage();
-  const hostService = new MockRoomService(storage);
-  const guestService = new MockRoomService(storage);
+  const hostIdentity = createMemoryMockStorage();
+  const guestIdentity = createMemoryMockStorage();
+  const hostService = new MockRoomService(storage, hostIdentity);
+  const guestService = new MockRoomService(storage, guestIdentity);
   const created = await hostService.createRoom({
     title: 'Coordination Test',
     displayName: 'Host Hema',
@@ -49,7 +54,7 @@ async function setup() {
     locationLabel: 'Koramangala',
   });
   const guestId = joined.currentParticipantId!;
-  return { storage, hostService, guestService, roomId, code, hostId, guestId };
+  return { storage, hostIdentity, guestIdentity, hostService, guestService, roomId, code, hostId, guestId };
 }
 
 /** Act as a given participant: the demo identity is the current-participant map. */
@@ -78,8 +83,7 @@ async function expectCode(promise: Promise<unknown>, code: string) {
 
 describe('voting', () => {
   it('saving replaces the previous ranking (one active vote, no duplicates)', async () => {
-    const { hostService, roomId, hostId, storage } = await setup();
-    actAs(storage, roomId, hostId);
+    const { hostService, roomId, hostId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
     const [a, b, c] = detail!.spots.map((s) => s.id);
     await hostService.submitVotes(roomId, hostId, [a, b, c]);
@@ -91,12 +95,10 @@ describe('voting', () => {
   });
 
   it('votes are visible to a second reader and the tally/winner follow the group', async () => {
-    const { hostService, guestService, roomId, hostId, guestId, storage } = await setup();
+    const { hostService, guestService, roomId, hostId, guestId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
     const [a, b, c] = detail!.spots.map((s) => s.id);
-    actAs(storage, roomId, hostId);
     await hostService.submitVotes(roomId, hostId, [a, b, c]);
-    actAs(storage, roomId, guestId);
     await guestService.submitVotes(roomId, guestId, [b, a, c]);
     const votesFromGuest = await guestService.getVotes(roomId);
     expect(votesFromGuest).toHaveLength(6);
@@ -110,11 +112,10 @@ describe('voting', () => {
   });
 
   it('rejects votes from non-members and invalid rankings', async () => {
-    const { hostService, roomId, hostId, storage } = await setup();
+    const { hostService, roomId, hostId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
     const [a, b] = detail!.spots.map((s) => s.id);
     await expectCode(hostService.submitVotes(roomId, 'not-a-participant', [a, b]), 'NOT_MEMBER');
-    actAs(storage, roomId, hostId);
     await expectCode(hostService.submitVotes(roomId, hostId, [a, a]), 'VOTE_FAILED');
     await expectCode(hostService.submitVotes(roomId, hostId, []), 'VOTE_FAILED');
     await expectCode(hostService.submitVotes(roomId, hostId, ['unknown-spot']), 'VOTE_FAILED');
@@ -123,10 +124,9 @@ describe('voting', () => {
 
 describe('finalization', () => {
   it('host finalizes; every reader sees the same destination', async () => {
-    const { hostService, guestService, roomId, hostId, storage } = await setup();
+    const { hostService, guestService, roomId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
     const spot = detail!.spots[1];
-    actAs(storage, roomId, hostId);
     const finalized = await hostService.finalizeMeeting(roomId, spot.id, detail!.room.decisionVersion);
     expect(finalized.room.status).toBe('finalized');
     expect(finalized.room.finalizedSpotId).toBe(spot.id);
@@ -140,11 +140,13 @@ describe('finalization', () => {
   });
 
   it('joining a finalized room is allowed for viewing, but voting is closed', async () => {
-    const { hostService, guestService, roomId, hostId, code, storage } = await setup();
+    const { hostService, roomId, code, storage } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
-    actAs(storage, roomId, hostId);
     await hostService.finalizeMeeting(roomId, detail!.spots[0].id);
-    const late = await guestService.joinRoom({
+    // A THIRD browser (fresh identity): reusing the guest service
+    // would rejoin as the existing guest instead of creating Lena.
+    const lateService = new MockRoomService(storage, createMemoryMockStorage());
+    const late = await lateService.joinRoom({
       inviteCode: code,
       displayName: 'Late Lena',
       location: { lat: 12.9, lng: 77.6 },
@@ -154,24 +156,23 @@ describe('finalization', () => {
     expect(late.room.finalizedSpotId).toBe(detail!.spots[0].id);
     const lateId = late.currentParticipantId!;
     await expectCode(
-      guestService.submitVotes(roomId, lateId, detail!.spots.map((s) => s.id)),
+      lateService.submitVotes(roomId, lateId, detail!.spots.map((s) => s.id)),
       'ALREADY_FINALIZED',
     );
   });
 
   it('rejects non-host and non-member finalization', async () => {
-    const { hostService, roomId, guestId, storage } = await setup();
+    const { hostService, roomId, guestId, hostIdentity } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
-    actAs(storage, roomId, guestId);
+    actAs(hostIdentity, roomId, guestId);
     await expectCode(hostService.finalizeMeeting(roomId, detail!.spots[0].id), 'NOT_HOST');
-    actAs(storage, roomId, null);
+    actAs(hostIdentity, roomId, null);
     await expectCode(hostService.finalizeMeeting(roomId, detail!.spots[0].id), 'NOT_MEMBER');
   });
 
   it('rejects a stale decision version on an open room', async () => {
-    const { hostService, roomId, hostId, storage } = await setup();
+    const { hostService, roomId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
-    actAs(storage, roomId, hostId);
     await expectCode(
       hostService.finalizeMeeting(roomId, detail!.spots[0].id, detail!.room.decisionVersion + 5),
       'STALE_VERSION',
@@ -182,10 +183,9 @@ describe('finalization', () => {
   });
 
   it('rejects a second finalize and keeps the first destination', async () => {
-    const { hostService, roomId, hostId, storage } = await setup();
+    const { hostService, roomId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
     const [first, second] = detail!.spots;
-    actAs(storage, roomId, hostId);
     await hostService.finalizeMeeting(roomId, first.id, detail!.room.decisionVersion);
     await expectCode(
       hostService.finalizeMeeting(roomId, second.id, detail!.room.decisionVersion),
@@ -236,12 +236,10 @@ describe('navigation privacy + ETA', () => {
 
 describe('arrival', () => {
   it('own arrival sets and clears, flows to the second reader, and others cannot set yours', async () => {
-    const { hostService, guestService, roomId, hostId, guestId, storage } = await setup();
+    const { hostService, guestService, roomId, hostId, guestId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
-    actAs(storage, roomId, hostId);
     await hostService.finalizeMeeting(roomId, detail!.spots[0].id);
     // Guest confirms their own arrival.
-    actAs(storage, roomId, guestId);
     await guestService.confirmArrival(roomId, guestId, true);
     const seenByHost = await hostService.getRoomDetail(roomId);
     expect(seenByHost!.participants.find((p) => p.id === guestId)!.arrivedAt).not.toBeNull();
@@ -254,8 +252,7 @@ describe('arrival', () => {
   });
 
   it('arrival is rejected before finalization', async () => {
-    const { hostService, roomId, hostId, storage } = await setup();
-    actAs(storage, roomId, hostId);
+    const { hostService, roomId, hostId } = await setup();
     try {
       await hostService.confirmArrival(roomId, hostId, true);
       expect.unreachable('expected arrival to be rejected before finalization');
@@ -280,7 +277,6 @@ describe('expiry', () => {
       }),
       'EXPIRED',
     );
-    actAs(storage, roomId, hostId);
     await expectCode(
       hostService.submitVotes(roomId, hostId, detail!.spots.map((s) => s.id)),
       'EXPIRED',
@@ -345,11 +341,10 @@ describe('stale optimization', () => {
   }
 
   it('a result becomes stale after finalization and cannot overwrite the decision', async () => {
-    const { hostService, roomId, hostId, storage } = await setup();
+    const { hostService, roomId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
     const result = await runSearch(detail!, detail!.room.decisionVersion);
     expect(isOptimizationStale(result, detail!.room, detail!.participants).stale).toBe(false);
-    actAs(storage, roomId, hostId);
     await hostService.finalizeMeeting(roomId, detail!.spots[0].id, detail!.room.decisionVersion);
     const after = await hostService.getRoomDetail(roomId);
     expect(isOptimizationStale(result, after!.room, after!.participants).stale).toBe(true);
@@ -363,13 +358,80 @@ describe('stale optimization', () => {
   });
 
   it('a result becomes stale after a location update', async () => {
-    const { hostService, roomId, hostId, storage } = await setup();
+    const { hostService, roomId } = await setup();
     const detail = await hostService.getRoomDetail(roomId);
     const result = await runSearch(detail!, detail!.room.decisionVersion);
-    actAs(storage, roomId, hostId);
     await hostService.updateLocation({ roomId, lat: 12.98, lng: 77.65, label: 'Moved' });
     const after = await hostService.getRoomDetail(roomId);
     expect(isOptimizationStale(result, after!.room, after!.participants).stale).toBe(true);
+  });
+});
+
+describe('demo identity (per-browser)', () => {
+  it('a second browser joining with the same display name creates a new participant (no adoption)', async () => {
+    const storage = createMemoryMockStorage();
+    const browserA = new MockRoomService(storage, createMemoryMockStorage());
+    const browserB = new MockRoomService(storage, createMemoryMockStorage());
+    const created = await browserA.createRoom({
+      title: 'Identity Test',
+      displayName: 'Alex',
+      location: { lat: 12.9716, lng: 77.6412 },
+      locationLabel: 'Indiranagar',
+    });
+    const joined = await browserB.joinRoom({
+      inviteCode: created.room.inviteCode,
+      displayName: 'Alex',
+      location: { lat: 12.9352, lng: 77.6245 },
+      locationLabel: 'Koramangala',
+    });
+    // Same name, different browser: a NEW participant, never the host's row.
+    expect(joined.currentParticipantId).not.toBe(created.currentParticipantId);
+    const detail = await browserA.getRoomDetail(created.room.id);
+    // Host + 3 seeded demo friends + the new joiner (no adoption, no merge).
+    expect(detail!.participants).toHaveLength(5);
+    expect(detail!.participants.filter((p) => p.isHost)).toHaveLength(1);
+    const second = detail!.participants.find((p) => p.id === joined.currentParticipantId)!;
+    expect(second.isHost).toBe(false);
+    expect(second.location?.label).toBe('Koramangala');
+  });
+
+  it('rejoining from the same browser updates name and location without duplicating', async () => {
+    const storage = createMemoryMockStorage();
+    const browserA = new MockRoomService(storage, createMemoryMockStorage());
+    const browserB = new MockRoomService(storage, createMemoryMockStorage());
+    const created = await browserA.createRoom({
+      title: 'Identity Test',
+      displayName: 'Host Hema',
+      location: { lat: 12.9716, lng: 77.6412 },
+      locationLabel: 'Indiranagar',
+    });
+    const first = await browserB.joinRoom({
+      inviteCode: created.room.inviteCode,
+      displayName: 'Jay',
+      location: { lat: 12.9352, lng: 77.6245 },
+      locationLabel: 'Koramangala',
+    });
+    const second = await browserB.joinRoom({
+      inviteCode: created.room.inviteCode,
+      displayName: 'Jay Renamed',
+      location: { lat: 12.9, lng: 77.6 },
+      locationLabel: 'HSR Layout',
+    });
+    expect(second.currentParticipantId).toBe(first.currentParticipantId);
+    const detail = await browserA.getRoomDetail(created.room.id);
+    // No duplicate created: host + 3 seeded demo friends + the one rejoined participant.
+    expect(detail!.participants).toHaveLength(5);
+    const rejoined = detail!.participants.find((p) => p.id === first.currentParticipantId)!;
+    expect(rejoined.displayName).toBe('Jay Renamed');
+    expect(rejoined.location?.label).toBe('HSR Layout');
+  });
+
+  it('the seeded demo room keeps a stable id across reads', async () => {
+    const service = new MockRoomService(createMemoryMockStorage());
+    const first = await service.getRoomByCode('K7M2QX');
+    const second = await service.getRoomByCode('K7M2QX');
+    expect(first).not.toBeNull();
+    expect(second!.room.id).toBe(first!.room.id);
   });
 });
 

@@ -38,10 +38,16 @@ export function FinalNavigation() {
 
   useEffect(() => {
     if (!detail) return;
+    let cancelled = false;
     getRoomService()
       .getRouteEstimates(detail.room.id)
-      .then(setEstimates)
+      .then((rows) => {
+        if (!cancelled) setEstimates(rows);
+      })
       .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [detail]);
 
   const spot = detail?.spots.find((s) => s.id === detail.room.finalizedSpotId) ?? null;
@@ -109,8 +115,16 @@ export function FinalNavigation() {
     [liveRoutes.routes, detail],
   );
   const animation = useRouteAnimation(animationRoutes);
+  // Geometry-aware signature: participant ids alone miss route changes
+  // from Realtime location updates, leaving stale durations/progress.
   const animationSig = useMemo(
-    () => `${spot?.id ?? 'none'}:${mode}:${animationRoutes.map((r) => r.participantId).join(',')}`,
+    () =>
+      `${spot?.id ?? 'none'}:${mode}:${animationRoutes
+        .map(
+          (r) =>
+            `${r.participantId}:${r.geometry.length}:${r.geometry[0]?.join(',') ?? ''}:${r.geometry[r.geometry.length - 1]?.join(',') ?? ''}:${r.durationMin}`,
+        )
+        .join(',')}`,
     [spot, mode, animationRoutes],
   );
   const animationSigRef = useRef(animationSig);
@@ -136,25 +150,40 @@ export function FinalNavigation() {
     return (
       <div className="mx-auto max-w-xl space-y-4">
         <h1 className="text-2xl font-bold text-white">Final navigation</h1>
-        <ErrorBanner title="Room not found" message={error ?? 'Room not found.'} onRetry={reload} showJoinLink />
+        <ErrorBanner title="Room not found" message={error ?? 'Room not found.'} onRetry={reload} showJoinLink joinCode={code} />
       </div>
     );
   }
 
   if (!spot) {
+    // Distinguish "not finalized yet" from "finalized but the spot row
+    // is missing": the latter must not claim no spot was finalized.
+    const finalizedMissingSpot = detail.room.status === 'finalized';
     return (
       <div className="mx-auto max-w-xl space-y-4">
         <h1 className="text-2xl font-bold text-white">Final navigation</h1>
         <ExpiredBanner room={detail.room} />
+        <FinalizedBanner room={detail.room} spots={detail.spots} />
         <RealtimeStatusBanner status={realtimeStatus} onRetry={reload} />
-        <EmptyState
-          title="No spot finalized yet"
-          description="Head back to Compare & vote to pick a winner, then finalize the meeting."
-        >
-          <Link to={`/room/${detail.room.inviteCode}/compare`} className="btn-primary !px-4 !py-2 text-xs">
-            Go to Compare & vote
-          </Link>
-        </EmptyState>
+        {finalizedMissingSpot ? (
+          <EmptyState
+            title="Final spot unavailable"
+            description="This meeting was finalized, but the spot details could not be loaded. Reload to check again."
+          >
+            <button type="button" onClick={reload} className="btn-secondary !px-4 !py-2 text-xs">
+              Reload
+            </button>
+          </EmptyState>
+        ) : (
+          <EmptyState
+            title="No spot finalized yet"
+            description="Head back to Compare & vote to pick a winner, then finalize the meeting."
+          >
+            <Link to={`/room/${detail.room.inviteCode}/compare`} className="btn-primary !px-4 !py-2 text-xs">
+              Go to Compare & vote
+            </Link>
+          </EmptyState>
+        )}
       </div>
     );
   }

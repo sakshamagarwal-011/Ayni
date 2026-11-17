@@ -4,6 +4,7 @@ import {
   DEFAULT_OSRM_BASE_URL,
   DEFAULT_RASTER_FALLBACK_URL,
   getMapConfig,
+  mapConfigWarnings,
   parseMapConfig,
   resetMapConfigCache,
 } from '../../src/map/config';
@@ -23,10 +24,15 @@ describe('map config defaults', () => {
     expect(config.osrmCacheTtlMs).toBe(600_000);
   });
 
-  it('getMapConfig returns the defaults when no map env vars are set', () => {
+  it('getMapConfig parses the real env and caches the result', () => {
+    // Env-independent: the developer's .env may set live providers, so
+    // assert consistency with parseMapConfig(import.meta.env) + caching
+    // instead of hardcoded defaults (defaults are covered above).
     resetMapConfigCache();
-    expect(getMapConfig().routingProvider).toBe('mock');
-    expect(getMapConfig().styleUrl).toBe(DEFAULT_MAP_STYLE_URL);
+    const config = getMapConfig();
+    expect(config).toEqual(parseMapConfig((import.meta.env ?? {}) as Record<string, string | undefined>));
+    expect(getMapConfig()).toBe(config);
+    resetMapConfigCache();
   });
 });
 
@@ -80,7 +86,15 @@ describe('map config overrides', () => {
 
   it('clamps numeric values into safe ranges', () => {
     expect(parseMapConfig({ VITE_OSRM_MIN_INTERVAL_MS: '99999' }).osrmMinIntervalMs).toBe(10_000);
-    expect(parseMapConfig({ VITE_OSRM_MIN_INTERVAL_MS: '-5' }).osrmMinIntervalMs).toBe(0);
+    // Against the default demo server the gap floor is 1000ms: a typo
+    // must never disable throttling there.
+    expect(parseMapConfig({ VITE_OSRM_MIN_INTERVAL_MS: '-5' }).osrmMinIntervalMs).toBe(1000);
+    expect(parseMapConfig({ VITE_OSRM_MIN_INTERVAL_MS: '0' }).osrmMinIntervalMs).toBe(1000);
+    // A custom (self-hosted) server may opt into a lower gap.
+    expect(
+      parseMapConfig({ VITE_OSRM_BASE_URL: 'https://osrm.example.com', VITE_OSRM_MIN_INTERVAL_MS: '0' })
+        .osrmMinIntervalMs,
+    ).toBe(0);
     expect(parseMapConfig({ VITE_OSRM_TIMEOUT_MS: '5' }).osrmTimeoutMs).toBe(1000);
     expect(parseMapConfig({ VITE_OSRM_TIMEOUT_MS: '999999' }).osrmTimeoutMs).toBe(60_000);
   });
@@ -88,5 +102,29 @@ describe('map config overrides', () => {
   it('trims whitespace and strips multiple trailing slashes from the OSRM base URL', () => {
     const config = parseMapConfig({ VITE_OSRM_BASE_URL: '  https://osrm.example.com///  ' });
     expect(config.osrmBaseUrl).toBe('https://osrm.example.com');
+  });
+
+  it('documents TTL 0 as never-expire', () => {
+    expect(parseMapConfig({ VITE_OSRM_CACHE_TTL_MS: '0' }).osrmCacheTtlMs).toBe(0);
+  });
+});
+
+describe('mapConfigWarnings', () => {
+  it('is silent for valid values and empty env', () => {
+    expect(mapConfigWarnings({})).toEqual([]);
+    expect(
+      mapConfigWarnings({ VITE_ROUTING_PROVIDER: 'osrm', VITE_OSRM_BASE_URL: 'https://osrm.example.com' }),
+    ).toEqual([]);
+  });
+
+  it('warns on bad URLs, unknown providers and non-numeric ints', () => {
+    const warnings = mapConfigWarnings({
+      VITE_OSRM_BASE_URL: 'not-a-url',
+      VITE_ROUTING_PROVIDER: 'valhalla',
+      VITE_OSRM_TIMEOUT_MS: 'banana',
+    });
+    expect(warnings.join(' ')).toMatch(/VITE_OSRM_BASE_URL/);
+    expect(warnings.join(' ')).toMatch(/VITE_ROUTING_PROVIDER/);
+    expect(warnings.join(' ')).toMatch(/VITE_OSRM_TIMEOUT_MS/);
   });
 });

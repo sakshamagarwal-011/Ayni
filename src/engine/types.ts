@@ -23,6 +23,11 @@ export type MeetingCategory =
   | 'library'
   | 'coworking'
   | 'fastFood'
+  | 'mall'
+  | 'metroStation'
+  | 'railwayStation'
+  | 'marketplace'
+  | 'teaStall'
   | 'any';
 
 export const OPTIMIZATION_PREFERENCES: OptimizationPreference[] = ['minTotal', 'minimax', 'balanced'];
@@ -41,6 +46,11 @@ export const MEETING_CATEGORIES: MeetingCategory[] = [
   'library',
   'coworking',
   'fastFood',
+  'mall',
+  'metroStation',
+  'railwayStation',
+  'marketplace',
+  'teaStall',
   'any',
 ];
 
@@ -52,6 +62,11 @@ export const CATEGORY_LABELS: Record<MeetingCategory, string> = {
   library: 'Library',
   coworking: 'Coworking',
   fastFood: 'Fast food',
+  mall: 'Mall',
+  metroStation: 'Metro station',
+  railwayStation: 'Railway station',
+  marketplace: 'Marketplace',
+  teaStall: 'Tea stall',
   any: 'Anywhere to meet',
 };
 

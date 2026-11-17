@@ -28,7 +28,39 @@ export const GEOLOCATION_OPTIONS: PositionOptions = {
   maximumAge: 30_000,
 };
 
-/** User-facing message for a GeolocationPositionError code. Pure + unit-tested. */
+/** Accuracy above this is "low" for meeting-point purposes: a cell/Wi-Fi fix can be blocks off. */
+export const LOW_ACCURACY_THRESHOLD_M = 100;
+/** A fix older than this is treated as stale (the request itself allows 30s-old cached fixes). */
+export const STALE_FIX_AGE_MS = 60_000;
+
+export interface GeolocationQuality {
+  /** True when the fix is too imprecise or too old to trust blindly. */
+  degraded: boolean;
+  lowAccuracy: boolean;
+  staleFix: boolean;
+  /** User-facing warning, or null when the fix looks good. Non-blocking: the fix is still usable. */
+  warning: string | null;
+}
+
+/**
+ * Assess a GPS fix's quality (pure + unit-tested). Accuracy and age
+ * were previously collected and discarded; a kilometres-off cell fix
+ * was silently accepted as the user's location.
+ */
+export function assessGeolocationFix(result: GeolocationResult, nowMs: number = Date.now()): GeolocationQuality {
+  const lowAccuracy = result.accuracyM !== null && result.accuracyM > LOW_ACCURACY_THRESHOLD_M;
+  const staleFix = nowMs - result.timestamp > STALE_FIX_AGE_MS;
+  const parts: string[] = [];
+  if (lowAccuracy) {
+    parts.push(
+      `GPS accuracy is low (about ${Math.round(result.accuracyM!)} m) — the pin may be blocks off. Drag it to adjust if it looks wrong.`,
+    );
+  }
+  if (staleFix) {
+    parts.push('This GPS fix is over a minute old — it may not reflect where you are now. Drag the pin to adjust.');
+  }
+  return { degraded: lowAccuracy || staleFix, lowAccuracy, staleFix, warning: parts.length > 0 ? parts.join(' ') : null };
+}
 export function geolocationErrorMessage(code: number | null): string {
   switch (code) {
     case 1: // PERMISSION_DENIED

@@ -82,10 +82,48 @@ export const AVATAR_COLORS = ['#3B82F6', '#8B5CF6', '#10B981', '#F59E0B', '#EC48
 
 export const DEMO_INVITE_CODE = 'K7M2QX';
 
-/** Starting-area presets shown on Create / Join forms. */
-export const STARTING_AREAS = MOCK_FRIENDS.map((f) => ({
-  id: f.id,
-  label: `${f.area} — ${f.name.split(' ')[0]}'s area`,
-  area: f.area,
-  location: f.location,
-}));
+/**
+ * Starting-area presets shown on Create / Join forms. Bengaluru areas
+ * come first (derived from the demo friends, order unchanged), then
+ * one well-known central anchor per additional metro. Coordinates
+ * verified by geocoding 2026-11-17; users can refine with the map pin
+ * or coordinate tabs.
+ */
+export const STARTING_AREAS = [
+  ...MOCK_FRIENDS.map((f) => ({
+    id: f.id,
+    label: `${f.area} — ${f.name.split(' ')[0]}'s area`,
+    area: f.area,
+    location: f.location,
+  })),
+  {
+    id: 'area-delhi-cp',
+    label: 'Connaught Place, Delhi',
+    area: 'Connaught Place, Delhi',
+    location: { lat: 28.634, lng: 77.2197 },
+  },
+  {
+    id: 'area-mumbai-bandra-west',
+    label: 'Bandra West, Mumbai',
+    area: 'Bandra West, Mumbai',
+    location: { lat: 19.048, lng: 72.8312 },
+  },
+  {
+    id: 'area-pune-koregaon-park',
+    label: 'Koregaon Park, Pune',
+    area: 'Koregaon Park, Pune',
+    location: { lat: 18.5353, lng: 73.8938 },
+  },
+  {
+    id: 'area-hyderabad-banjara-hills',
+    label: 'Banjara Hills, Hyderabad',
+    area: 'Banjara Hills, Hyderabad',
+    location: { lat: 17.4153, lng: 78.4344 },
+  },
+  {
+    id: 'area-chennai-t-nagar',
+    label: 'T. Nagar, Chennai',
+    area: 'T. Nagar, Chennai',
+    location: { lat: 13.0454, lng: 80.2339 },
+  },
+];

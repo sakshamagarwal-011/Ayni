@@ -62,6 +62,52 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Sleep that rejects promptly when `signal` aborts (no 30s stall on Retry-After waits). */
+function sleepAbortable(ms: number, signal: AbortSignal | undefined, sleepFn: (ms: number) => Promise<void>): Promise<void> {
+  if (!signal) return sleepFn(ms);
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    void sleepFn(ms).then(
+      () => {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      },
+      (err) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** Share an in-flight result with a second caller whose own signal can still cancel THEIR wait. */
+function shareInflight<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return pending;
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener('abort', onAbort);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    void pending.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (err) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 function placesError(status: number): EngineUnavailableError {
   if (status === 429) {
     return new EngineUnavailableError(
@@ -107,7 +153,7 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
               : 1000;
             clearTimeout(timeout);
             signal?.removeEventListener('abort', onExternalAbort);
-            await sleepFn(delayMs);
+            await sleepAbortable(delayMs, signal, sleepFn);
             if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
             continue;
           }
@@ -141,13 +187,15 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
   return {
     provider: 'overpass',
     async search(area, category, limit, signal) {
-      const query = buildOverpassQuery(area, category, limit);
+      // The QL timeout derives from the client timeout so a configured
+      // 60s client timeout is not silently capped by a 25s QL timeout.
+      const query = buildOverpassQuery(area, category, limit, Math.round(options.timeoutMs / 1000));
       const entry = cache.get(query);
       if (entry && (cacheTtlMs <= 0 || now() - entry.fetchedAt <= cacheTtlMs)) {
         return entry.result;
       }
       const pending = inflight.get(query);
-      if (pending) return pending;
+      if (pending) return shareInflight(pending, signal);
       const task = runQuery(query, signal)
         .then((result) => {
           if (cache.size >= MAX_CACHE_ENTRIES) {
@@ -167,15 +215,56 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
 }
 
 /**
+ * Shared Overpass client singleton (keyed by endpoint + timeout), so
+ * the 10-minute cache survives across searches instead of being thrown
+ * away with a fresh client per search. Mirrors the routing singleton
+ * in src/map/routing.ts. Tests should use createOverpassClient directly.
+ */
+const sharedClients = new Map<string, PlacesClient>();
+
+export function getSharedOverpassClient(options: OverpassClientOptions): PlacesClient {
+  const key = `${options.baseUrl}|${options.timeoutMs}`;
+  const existing = sharedClients.get(key);
+  if (existing) return existing;
+  const client = createOverpassClient(options);
+  sharedClients.set(key, client);
+  return client;
+}
+
+/** Lenient demo-category matching: room spot labels vs. the search category. */
+const DEMO_CATEGORY_TOKENS: Record<MeetingCategory, string[]> = {
+  cafe: ['café', 'cafe', 'coffee'],
+  restaurant: ['restaurant'],
+  bar: ['bar', 'pub', 'brewery'],
+  park: ['park', 'garden'],
+  library: ['library'],
+  coworking: ['coworking', 'co-working'],
+  fastFood: ['fast food'],
+  mall: ['mall'],
+  metroStation: ['metro'],
+  railwayStation: ['railway', 'station'],
+  marketplace: ['market'],
+  teaStall: ['tea'],
+  any: [],
+};
+
+/**
  * Mock places client: returns injected demo places (the room's existing
- * spots, mapped to CandidatePlace) for every search. Used by the demo
- * path only; results are always labelled Demo.
+ * spots, mapped to CandidatePlace) for every search, filtered by the
+ * requested category (so the category selector is honoured in demo
+ * mode too). Used by the demo path only; results are always labelled Demo.
  */
 export function createMockPlacesClient(demoPlaces: CandidatePlace[]): PlacesClient {
   return {
     provider: 'mock',
-    async search() {
-      return { places: [...demoPlaces], dropped: 0, duplicatesRemoved: 0 };
+    async search(_area, category) {
+      if (category === 'any') return { places: [...demoPlaces], dropped: 0, duplicatesRemoved: 0 };
+      const tokens = DEMO_CATEGORY_TOKENS[category] ?? [];
+      const places = demoPlaces.filter((p) => {
+        const label = p.category.toLowerCase();
+        return tokens.some((t) => label.includes(t));
+      });
+      return { places, dropped: 0, duplicatesRemoved: 0 };
     },
   };
 }

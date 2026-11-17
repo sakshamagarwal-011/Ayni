@@ -7,12 +7,15 @@ export function ErrorBanner({
   onRetry,
   retryLabel = 'Try again',
   showJoinLink = false,
+  joinCode,
 }: {
   title?: string;
   message: string;
   onRetry?: () => void;
   retryLabel?: string;
   showJoinLink?: boolean;
+  /** Invite code preserved by the Join link (dropping it strands the user at an empty Join form). */
+  joinCode?: string;
 }) {
   return (
     <div role="alert" className="glass-card border-rose-500/30 bg-rose-500/10 p-4 sm:p-5">
@@ -25,7 +28,7 @@ export function ErrorBanner({
           </button>
         )}
         {showJoinLink && (
-          <Link to="/join" className="btn-secondary !px-4 !py-2 text-xs">
+          <Link to={joinCode ? `/join/${joinCode}` : '/join'} className="btn-secondary !px-4 !py-2 text-xs">
             Go to Join Meeting
           </Link>
         )}

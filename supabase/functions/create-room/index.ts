@@ -7,6 +7,7 @@ import { handleOptions, jsonError, jsonResponse } from '../_shared/cors.ts';
 import {
   avatarColorFor,
   generateInviteCode,
+  validateAccuracyM,
   validateDisplayName,
   validateLatLng,
   validateTitle,
@@ -67,6 +68,7 @@ Deno.serve(async (req: Request) => {
       lat?: unknown;
       lng?: unknown;
       label?: unknown;
+      accuracyM?: unknown;
     }>(req);
     if (!body) return jsonError('Invalid JSON body.', 400);
 
@@ -76,6 +78,8 @@ Deno.serve(async (req: Request) => {
     if (nameError) return jsonError(nameError, 400);
     const locError = validateLatLng(body.lat, body.lng);
     if (locError) return jsonError(locError, 400);
+    const acc = validateAccuracyM(body.accuracyM);
+    if (acc.error) return jsonError(acc.error, 400);
     const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 60) : 'Starting point';
 
     const service = getServiceClient();
@@ -104,7 +108,12 @@ Deno.serve(async (req: Request) => {
       lastError = error?.message ?? 'Failed to create room.';
       if (code !== '23505') return jsonError('Failed to create room.', 500);
     }
-    if (!room) return jsonError(lastError ?? 'Failed to create room.', 500);
+    if (!room) {
+      // Never leak the raw DB error to the client after collision
+      // exhaustion — log it server-side only.
+      console.error('create-room: invite code collisions exhausted', lastError);
+      return jsonError('Failed to create room. Please try again.', 500);
+    }
 
     const roomId = room['id'] as string;
     const inviteCode = room['invite_code'] as string;
@@ -128,17 +137,30 @@ Deno.serve(async (req: Request) => {
     }
 
     const participantId = (participant as { id: string }).id;
-    await service.from('participant_locations').insert({
+    // Location + spots failures must roll the room back: a room with
+    // no host location or zero spots is silently broken (finalization
+    // needs at least one spot). Previously these errors were ignored.
+    const { error: locInsertError } = await service.from('participant_locations').insert({
       participant_id: participantId,
       room_id: roomId,
       lat: body.lat,
       lng: body.lng,
       label,
-      accuracy_m: 20,
+      accuracy_m: acc.accuracyM,
       expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
     });
+    if (locInsertError) {
+      await service.from('meeting_rooms').delete().eq('id', roomId);
+      return jsonError('Failed to create room.', 500);
+    }
 
-    await service.from('candidate_spots').insert(DEFAULT_SPOTS.map((s) => ({ ...s, room_id: roomId })));
+    const { error: spotsError } = await service
+      .from('candidate_spots')
+      .insert(DEFAULT_SPOTS.map((s) => ({ ...s, room_id: roomId })));
+    if (spotsError) {
+      await service.from('meeting_rooms').delete().eq('id', roomId);
+      return jsonError('Failed to create room.', 500);
+    }
 
     return jsonResponse({
       room,

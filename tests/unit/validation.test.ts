@@ -4,6 +4,7 @@ import {
   INVITE_CODE_LENGTH,
   isValidInviteCode,
   normalizeInviteCode,
+  parseCoordinateText,
   validateDisplayName,
   validateInviteCode,
   validateLat,
@@ -38,6 +39,23 @@ describe('invite codes', () => {
     expect(validateInviteCode('')).toMatch(/required/);
     expect(validateInviteCode('BAD!')).toMatch(/valid 6-character/);
     expect(validateInviteCode('K7M2QX')).toBeNull();
+  });
+});
+
+describe('parseCoordinateText', () => {
+  it('parses valid numbers and trims whitespace', () => {
+    expect(parseCoordinateText('12.9716')).toBe(12.9716);
+    expect(parseCoordinateText('  -77.64 ')).toBe(-77.64);
+    expect(parseCoordinateText('0')).toBe(0);
+  });
+  it('returns null for empty, whitespace, non-numeric and infinite text — never 0', () => {
+    // Number('') === 0 used to pass validation and submit lat/lng 0.
+    expect(parseCoordinateText('')).toBeNull();
+    expect(parseCoordinateText('   ')).toBeNull();
+    expect(parseCoordinateText('abc')).toBeNull();
+    expect(parseCoordinateText('12.9.1')).toBeNull();
+    expect(parseCoordinateText('Infinity')).toBeNull();
+    expect(parseCoordinateText('NaN')).toBeNull();
   });
 });
 

@@ -56,6 +56,9 @@ export const BALANCED_WEIGHTS = { average: 0.4, max: 0.4, stdDev: 0.2 } as const
 
 /** Strategy score for one candidate's required-participant durations. Lower is better. */
 export function scoreCandidate(durations: number[], preference: OptimizationPreference): number {
+  if (durations.length === 0) {
+    throw new RangeError('Cannot score a candidate with no required durations.');
+  }
   const stats = summarizeDurations(durations);
   switch (preference) {
     case 'minTotal':
@@ -68,5 +71,7 @@ export function scoreCandidate(durations: number[], preference: OptimizationPref
         BALANCED_WEIGHTS.max * stats.max +
         BALANCED_WEIGHTS.stdDev * stats.stdDev
       );
+    default:
+      throw new RangeError(`Unknown optimization preference: ${String(preference)}.`);
   }
 }

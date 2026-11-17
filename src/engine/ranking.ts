@@ -17,8 +17,8 @@ import {
  *   unreachable or has no result. Optional participants never exclude.
  * - Step 9: a candidate is excluded when ANY required duration exceeds
  *   maxTravelMinutes (when set).
- * - Step 10: sort by (score, max, total, name) — documented stable
- *   tie-breaks — take the top 5, and explain each ranking in words.
+ * - Step 10: sort by (score, max, total, spread, name) — documented
+ *   stable tie-breaks — take the top 5, and explain each ranking in words.
  *
  * Scoring uses REQUIRED participants' durations only. Optional
  * participants' results are carried in `perParticipant` for display.
@@ -54,8 +54,9 @@ export function buildExplanation(
   requiredCount: number,
 ): string {
   const strategy = PREFERENCE_LABELS[preference];
+  const modeLabel = longest ? (MODE_LABELS[longest.origin.mode]?.toLowerCase() ?? longest.origin.mode) : '';
   const longestPart = longest
-    ? ` Longest trip: ${longest.origin.displayName} (${MODE_LABELS[longest.origin.mode].toLowerCase()}, ${formatMinutes(longest.durationMin)}).`
+    ? ` Longest trip: ${longest.origin.displayName} (${modeLabel}, ${formatMinutes(longest.durationMin)}).`
     : '';
   return (
     `${candidate.name} ranks by ${strategy} (score ${score.toFixed(1)}): ` +
@@ -135,6 +136,7 @@ export function rankCandidates(input: RankingInput): RankingOutput {
     if (a.score !== b.score) return a.score - b.score;
     if (a.maxMin !== b.maxMin) return a.maxMin - b.maxMin;
     if (a.totalMin !== b.totalMin) return a.totalMin - b.totalMin;
+    if (a.stdDevMin !== b.stdDevMin) return a.stdDevMin - b.stdDevMin;
     return a.candidate.name.localeCompare(b.candidate.name);
   });
   const top = ranked.slice(0, topN);

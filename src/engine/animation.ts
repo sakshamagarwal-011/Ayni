@@ -42,7 +42,9 @@ export function polylineLengthM(coordinates: LngLat[]): number {
 export function progressGeometry(coordinates: LngLat[], progress: number): LngLat[] {
   if (coordinates.length === 0) return [];
   if (coordinates.length === 1) return [coordinates[0].slice()];
-  const p = Math.min(1, Math.max(0, progress));
+  // Non-finite progress (NaN/Infinity) degrades to the start instead of
+  // leaking through Math.min/Math.max as a no-op clamp.
+  const p = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
   if (p <= 0) return [coordinates[0].slice(), coordinates[0].slice()];
   if (p >= 1) return coordinates.map((c) => c.slice());
   const total = polylineLengthM(coordinates);
@@ -102,8 +104,14 @@ export function animationDurationMs(lengthM: number, speed = 1): number {
   return Math.min(10_000, Math.max(1200, Math.round(raw)));
 }
 
-/** Midpoint of a polyline by vertex index (for travel-time label placement). */
+/**
+ * Midpoint of a polyline by ARC LENGTH (for travel-time label
+ * placement): the point halfway along the line's length, so labels sit
+ * at the visual middle even when vertices cluster at one end.
+ */
 export function midpointOf(coordinates: LngLat[]): LngLat | null {
   if (coordinates.length === 0) return null;
-  return coordinates[Math.floor(coordinates.length / 2)].slice();
+  if (coordinates.length === 1) return coordinates[0].slice();
+  const half = progressGeometry(coordinates, 0.5);
+  return half[half.length - 1].slice();
 }

@@ -23,6 +23,24 @@ function retentionDays(): number {
   return Math.min(90, Math.max(1, Math.floor(parsed)));
 }
 
+/**
+ * Constant-time secret comparison (no dependency): compares every byte
+ * of both values and accumulates differences with XOR, so the runtime
+ * does not depend on where the first mismatch is. Lengths are folded
+ * into the accumulator rather than short-circuiting.
+ */
+function secretsEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(a);
+  const bBytes = encoder.encode(b);
+  const len = Math.max(aBytes.length, bBytes.length);
+  let diff = aBytes.length ^ bBytes.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (aBytes[i] ?? 0) ^ (bBytes[i] ?? 0);
+  }
+  return diff === 0;
+}
+
 Deno.serve(async (req: Request) => {
   const options = handleOptions(req);
   if (options) return options;
@@ -32,7 +50,7 @@ Deno.serve(async (req: Request) => {
     const secret = Deno.env.get('CLEANUP_SECRET');
     if (!secret) return jsonError('Cleanup is not configured.', 500);
     const provided = req.headers.get('x-cron-secret');
-    if (!provided || provided !== secret) return jsonError('Unauthorized.', 401);
+    if (!provided || !secretsEqual(provided, secret)) return jsonError('Unauthorized.', 401);
 
     const service = getServiceClient();
 

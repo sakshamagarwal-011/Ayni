@@ -253,6 +253,7 @@ export function isActionAllowed(status: RoomStatus, action: RoomAction, context:
         return {
           allowed: false,
           reason: 'Arrival can only be confirmed once the meeting is finalized.',
+          code: 'NOT_FINALIZED',
         };
       }
       if (!isMember) {

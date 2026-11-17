@@ -25,7 +25,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     const userId = await getUserIdFromRequest(req);
-    if (!userId) return jsonError('Unauthorized.', 401, 'NOT_MEMBER');
+    if (!userId) return jsonError('Unauthorized.', 401, 'UNAUTHORIZED');
 
     const body = await readJsonBody<{ roomId?: unknown; spotId?: unknown; expectedDecisionVersion?: unknown }>(req);
     if (!body) return jsonError('Invalid JSON body.', 400);
@@ -112,6 +112,9 @@ Deno.serve(async (req: Request) => {
     }
 
     // Optimistic lock: only one concurrent finalize can match the version.
+    // The status predicate keeps a concurrent expire_rooms() from being
+    // undone: if the room flipped to 'expired' after the checks above,
+    // the update matches 0 rows and reports STALE_VERSION.
     const { data: updated, error } = await service
       .from('meeting_rooms')
       .update({
@@ -123,6 +126,7 @@ Deno.serve(async (req: Request) => {
       })
       .eq('id', body.roomId)
       .eq('decision_version', currentVersion)
+      .in('status', ['lobby', 'discovering', 'comparing'])
       .select('*')
       .maybeSingle();
     if (error) return jsonError('Failed to finalize meeting.', 500);

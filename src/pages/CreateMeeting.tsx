@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { LocationPicker, type LocationValue } from '../components/LocationPicker';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { Spinner } from '../components/LoadingSkeleton';
-import { STARTING_AREAS } from '../data/mockData';
 import { getDisplayNameDraft } from '../services/mockService';
 import { getRoomService } from '../services';
 import { validateDisplayName, validateLocation, validateTitle } from '../lib/validation';
@@ -12,10 +11,9 @@ export function CreateMeeting() {
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [displayName, setDisplayName] = useState(() => getDisplayNameDraft());
-  const [location, setLocation] = useState<LocationValue>({
-    location: STARTING_AREAS[0].location,
-    label: STARTING_AREAS[0].area,
-  });
+  // No location is pre-selected: the user must explicitly pick one.
+  const [location, setLocation] = useState<LocationValue | null>(null);
+  const [locationTextValid, setLocationTextValid] = useState(true);
   const [errors, setErrors] = useState<{ title?: string; name?: string; location?: string }>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -27,10 +25,15 @@ export function CreateMeeting() {
     const next = {
       title: validateTitle(title) ?? undefined,
       name: validateDisplayName(displayName) ?? undefined,
-      location: validateLocation(location.location.lat, location.location.lng, location.label) ?? undefined,
+      location:
+        !location
+          ? 'Please choose your starting location.'
+          : !locationTextValid
+            ? 'Enter valid coordinates for your starting location.'
+            : (validateLocation(location.location.lat, location.location.lng, location.label) ?? undefined),
     };
     setErrors(next);
-    if (next.title || next.name || next.location) return;
+    if (next.title || next.name || next.location || !location) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -39,6 +42,7 @@ export function CreateMeeting() {
         displayName: displayName.trim(),
         location: location.location,
         locationLabel: location.label,
+        accuracyM: location.accuracyM ?? null,
       });
       navigate(`/room/${detail.room.inviteCode}/lobby`);
     } catch (err) {
@@ -66,7 +70,11 @@ export function CreateMeeting() {
             id="title"
             className="input-field"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              // Clear a stale error once the user edits the field.
+              if (touched) setErrors((prev) => ({ ...prev, title: undefined }));
+            }}
             onBlur={() => setTouched(true)}
             placeholder="e.g. Weekend brunch meetup"
             maxLength={60}
@@ -90,7 +98,10 @@ export function CreateMeeting() {
             id="displayName"
             className="input-field"
             value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
+            onChange={(e) => {
+              setDisplayName(e.target.value);
+              if (touched) setErrors((prev) => ({ ...prev, name: undefined }));
+            }}
             placeholder="e.g. Alex"
             maxLength={30}
             aria-invalid={Boolean(touched && errors.name)}
@@ -104,7 +115,15 @@ export function CreateMeeting() {
           )}
         </div>
 
-        <LocationPicker value={location} onChange={setLocation} error={touched ? errors.location : null} />
+        <LocationPicker
+          value={location}
+          onChange={(v) => {
+            setLocation(v);
+            if (touched) setErrors((prev) => ({ ...prev, location: undefined }));
+          }}
+          error={touched ? errors.location : null}
+          onValidityChange={setLocationTextValid}
+        />
 
         <button type="submit" className="btn-primary w-full" disabled={submitting}>
           {submitting ? <Spinner label="Creating meeting" /> : 'Create meeting & get invite link'}

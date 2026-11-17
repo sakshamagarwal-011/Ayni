@@ -15,6 +15,9 @@
  *   and stops retrying; the UI offers a manual Retry (reload), and
  *   `reconnectNow()` (wired to the browser 'online' event) restarts
  *   immediately. No polling loops, no infinite retry.
+ * - While the browser reports offline, retries PAUSE without consuming
+ *   the attempt budget: the subscription reports 'offline' and waits
+ *   for `reconnectNow()` instead of burning all 5 attempts.
  * - `unsubscribe()` cancels any pending retry and tears down the
  *   channel; no further callbacks fire after disposal.
  * - Rapid database events are NOT debounced here — the caller
@@ -55,6 +58,8 @@ export interface ResilientSubscriptionOptions {
   maxAttempts?: number;
   schedule?: Scheduler;
   delayForAttempt?: (attempt: number) => number;
+  /** Connectivity probe. Defaults to navigator.onLine when available, else always online. */
+  isOnline?: () => boolean;
 }
 
 export interface ResilientSubscription {
@@ -72,6 +77,15 @@ export function createResilientSubscription(options: ResilientSubscriptionOption
   const maxAttempts = options.maxAttempts ?? MAX_RECONNECT_ATTEMPTS;
   const schedule = options.schedule ?? defaultSchedule;
   const delayForAttempt = options.delayForAttempt ?? backoffDelayMs;
+  const isOnline =
+    options.isOnline ??
+    (() => {
+      try {
+        return typeof navigator === 'undefined' ? true : navigator.onLine !== false;
+      } catch {
+        return true;
+      }
+    });
 
   let disposed = false;
   let channel: ChannelHandle | null = null;
@@ -103,6 +117,13 @@ export function createResilientSubscription(options: ResilientSubscriptionOption
 
   function scheduleRetry(): void {
     if (disposed) return;
+    if (!isOnline()) {
+      // Offline: pause without consuming the attempt budget. The
+      // caller restarts via reconnectNow() on the 'online' event.
+      state = 'waiting';
+      report('offline');
+      return;
+    }
     if (attempts >= maxAttempts) {
       state = 'error';
       report('error');

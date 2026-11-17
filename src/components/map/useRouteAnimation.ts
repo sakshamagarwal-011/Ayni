@@ -61,7 +61,11 @@ export function useRouteAnimation(initialRoutes: AnimatableRouteInput[]): RouteA
   const [durationMs, setDurationMs] = useState(3000);
 
   const progressRef = useRef(progress);
-  progressRef.current = progress;
+  // Source of truth for playback progress: accumulated on EVERY
+  // animation frame. The React state (`progress`) is only a throttled
+  // mirror for rendering. Deriving progress from the throttled state
+  // (as before) discarded most increments and ran playback ~2-3x slow.
+  const progressValueRef = useRef(progress);
   const playingRef = useRef(playing);
   playingRef.current = playing;
   const speedRef = useRef(speed);
@@ -80,7 +84,10 @@ export function useRouteAnimation(initialRoutes: AnimatableRouteInput[]): RouteA
   const resetForRoutes = useCallback(
     (routes: AnimatableRouteInput[]) => {
       setVisibleIds(new Set(routes.map((r) => r.participantId)));
-      setProgress(reducedMotion ? 1 : 0);
+      const start = reducedMotion ? 1 : 0;
+      progressValueRef.current = start;
+      progressRef.current = start;
+      setProgress(start);
       setPlaying(false);
       recomputeDuration(routes);
     },
@@ -105,8 +112,12 @@ export function useRouteAnimation(initialRoutes: AnimatableRouteInput[]): RouteA
       const last = lastTickRef.current ?? now;
       lastTickRef.current = now;
       const dt = now - last;
-      const scaled = progressRef.current + (dt * speedRef.current) / durationRef.current;
+      // Accumulate in the ref on every tick; throttle only the React
+      // state update so playback duration matches durationMs.
+      const scaled = progressValueRef.current + (dt * speedRef.current) / durationRef.current;
       const clamped = Math.min(1, scaled);
+      progressValueRef.current = clamped;
+      progressRef.current = clamped;
       // Throttle React state updates to ~30fps; the map reads progress
       // from props and writes to MapLibre directly (no per-frame setState storm).
       if (now - lastStateUpdateRef.current >= 33 || clamped >= 1) {
@@ -136,19 +147,30 @@ export function useRouteAnimation(initialRoutes: AnimatableRouteInput[]): RouteA
   }, []);
 
   const play = useCallback(() => {
-    if (progressRef.current >= 1) setProgress(0);
+    if (progressValueRef.current >= 1) {
+      progressValueRef.current = 0;
+      progressRef.current = 0;
+      setProgress(0);
+    }
     setPlaying(true);
   }, []);
 
   const pause = useCallback(() => setPlaying(false), []);
 
   const replay = useCallback(() => {
+    progressValueRef.current = 0;
+    progressRef.current = 0;
     setProgress(0);
     setPlaying(true);
   }, []);
 
   const seek = useCallback((value: number) => {
-    setProgress(Math.min(1, Math.max(0, value)));
+    // Non-finite input (NaN from a broken slider/event) degrades to the
+    // start instead of freezing the rAF loop below 1 forever.
+    const safe = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+    progressValueRef.current = safe;
+    progressRef.current = safe;
+    setProgress(safe);
     setPlaying(false);
   }, []);
 

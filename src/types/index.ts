@@ -1,4 +1,4 @@
-export type TravelMode = 'walk' | 'bike' | 'car' | 'transit';
+export type TravelMode = 'walk' | 'scooter' | 'car' | 'transit';
 
 export type RoomStatus = 'lobby' | 'discovering' | 'comparing' | 'finalized' | 'expired';
 
@@ -115,6 +115,8 @@ export interface CreateRoomInput {
   displayName: string;
   location: Coordinates;
   locationLabel: string;
+  /** GPS fix accuracy in metres, when the location came from GPS. Persisted on the location row. */
+  accuracyM?: number | null;
 }
 
 export interface JoinRoomInput {
@@ -122,6 +124,8 @@ export interface JoinRoomInput {
   displayName: string;
   location: Coordinates;
   locationLabel: string;
+  /** GPS fix accuracy in metres, when the location came from GPS. Persisted on the location row. */
+  accuracyM?: number | null;
 }
 
 export interface UpdateLocationInput {
@@ -129,6 +133,8 @@ export interface UpdateLocationInput {
   lat: number;
   lng: number;
   label: string;
+  /** GPS fix accuracy in metres, when the location came from GPS. Persisted on the location row. */
+  accuracyM?: number | null;
 }
 
 export interface ServiceResult<T> {

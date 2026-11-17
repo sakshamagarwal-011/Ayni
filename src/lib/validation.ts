@@ -52,6 +52,19 @@ export function validateLng(lng: number): string | null {
   return null;
 }
 
+/**
+ * Parse free-typed coordinate text. Empty/whitespace/non-numeric text
+ * returns null — NEVER 0 (Number('') === 0 previously smuggled a
+ * (0, 0) "Null Island" location past validation when a field was
+ * cleared).
+ */
+export function parseCoordinateText(text: string): number | null {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function validateLocation(lat: number, lng: number, label: string): string | null {
   return validateLat(lat) ?? validateLng(lng) ?? (label.trim() ? null : 'Location label is required.');
 }

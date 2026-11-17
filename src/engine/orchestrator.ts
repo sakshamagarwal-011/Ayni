@@ -81,11 +81,16 @@ export interface OptimizationDeps {
   placesPerArea?: number;
   /** Max unique route pairs per run (default 60, live path only). */
   maxOsrmRequests?: number;
+  /** Overall deadline for the routing phase in ms (default 5 minutes). When it
+   *  expires, remaining pairs count as routing failures instead of hanging the
+   *  run (with the 1100ms throttle, a 60-pair run can otherwise take ~11 min). */
+  routingDeadlineMs?: number;
   now?: () => Date;
 }
 
 const DEFAULT_PLACES_PER_AREA = 30;
 const DEFAULT_MAX_OSRM_REQUESTS = 60;
+const DEFAULT_ROUTING_DEADLINE_MS = 5 * 60 * 1000;
 
 /** Max straight-line distance from a candidate to any required origin — geometry-only pre-filter ordering. */
 function maxStraightLineKm(candidate: CandidatePlace, required: ParticipantOrigin[]): number {
@@ -139,6 +144,9 @@ export async function runOptimization(
     }
   } catch (err) {
     if (err instanceof EngineError) throw err;
+    // A user abort is not a provider failure: rethrow it unchanged so
+    // callers can tell cancellation apart from an outage.
+    if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) throw err;
     throw new EngineUnavailableError('places');
   }
 
@@ -147,10 +155,13 @@ export async function runOptimization(
   duplicatesRemoved += deduped.duplicatesRemoved;
   const unique = deduped.places;
   if (unique.length === 0) {
-    throw new EngineNoPlacesError(
-      CATEGORY_LABELS[input.category].toLowerCase(),
-      `within ${searchAreas.map((a) => `${a.radiusKm.toFixed(1)} km of the group centre`).join(', ')}`,
-    );
+    // Describe the areas honestly: wide spreads search around outlying
+    // participants too, not just "N km of the group centre".
+    const areaDescription =
+      searchAreas.length <= 1
+        ? `within ${searchAreas[0]?.radiusKm.toFixed(1) ?? '2.0'} km of the group centre`
+        : `within the ${searchAreas.length} search areas around the group centre and outlying participants`;
+    throw new EngineNoPlacesError(CATEGORY_LABELS[input.category].toLowerCase(), areaDescription);
   }
 
   // Pre-filter (geometry only): cap OSRM work before routing. Final
@@ -168,6 +179,18 @@ export async function runOptimization(
   }
 
   // Steps 5–6 — route batches grouped by OSRM profile, deduplicated pairs.
+  // Dedup key: live OSRM pairs share by profile (car/transit both use
+  // 'driving' with identical durations), but demo durations are
+  // mode-dependent, so demo pairs also key on the origin's mode.
+  const pairKey = (origin: ParticipantOrigin, candidate: CandidatePlace): string => {
+    const { profile } = profileForMode(origin.mode);
+    const base = routeCacheKey(
+      { lat: origin.lat, lng: origin.lng },
+      { lat: candidate.lat, lng: candidate.lng },
+      profile,
+    );
+    return deps.routingClient.kind === 'demo' ? `${base}:${origin.mode}` : base;
+  };
   interface Pair {
     origin: ParticipantOrigin;
     candidate: CandidatePlace;
@@ -178,11 +201,7 @@ export async function runOptimization(
   for (const origin of input.origins) {
     for (const candidate of considered) {
       const { profile } = profileForMode(origin.mode);
-      const key = routeCacheKey(
-        { lat: origin.lat, lng: origin.lng },
-        { lat: candidate.lat, lng: candidate.lng },
-        profile,
-      );
+      const key = pairKey(origin, candidate);
       if (!pairByKey.has(key)) {
         pairByKey.set(key, { origin, candidate, key, profile });
       }
@@ -198,7 +217,18 @@ export async function runOptimization(
 
   const geometryByKey = new Map<string, RouteGeometry | null>();
   let routeFailures = 0;
+  let deadlineHit = false;
+  const routingDeadlineMs = deps.routingDeadlineMs ?? DEFAULT_ROUTING_DEADLINE_MS;
+  const routingStartedAt = nowFn().getTime();
   for (const pair of pairs) {
+    // Overall deadline: stop issuing requests once the budget is spent
+    // and count the rest as failures, instead of hanging for minutes.
+    if (nowFn().getTime() - routingStartedAt > routingDeadlineMs) {
+      deadlineHit = true;
+      routeFailures += 1;
+      geometryByKey.set(pair.key, null);
+      continue;
+    }
     const geometry = await deps.routingClient.fetchRoute(
       { lat: pair.origin.lat, lng: pair.origin.lng },
       { lat: pair.candidate.lat, lng: pair.candidate.lng },
@@ -211,6 +241,13 @@ export async function runOptimization(
   if (deps.routingClient.kind === 'osrm' && pairs.length > 0 && routeFailures === pairs.length) {
     throw new EngineUnavailableError('routing');
   }
+  if (routeFailures > 0 && routeFailures < pairs.length) {
+    warnings.push(
+      `Road routing failed for ${routeFailures} of ${pairs.length} route requests${deadlineHit ? ' (the search deadline was reached)' : ''}; affected places were excluded and results may be incomplete. Try again for a complete ranking.`,
+    );
+  } else if (deadlineHit && pairs.length > 0) {
+    warnings.push('The search deadline was reached before all routes could be computed; results may be incomplete.');
+  }
 
   // Build travel results. Live failures stay unreachable — no fallback.
   const source = deps.routingClient.kind === 'osrm' ? 'osrm' : 'demo';
@@ -218,12 +255,7 @@ export async function runOptimization(
   for (const candidate of considered) {
     const results: TravelResult[] = [];
     for (const origin of input.origins) {
-      const { profile } = profileForMode(origin.mode);
-      const key = routeCacheKey(
-        { lat: origin.lat, lng: origin.lng },
-        { lat: candidate.lat, lng: candidate.lng },
-        profile,
-      );
+      const key = pairKey(origin, candidate);
       const geometry = geometryByKey.get(key) ?? null;
       results.push({
         participantId: origin.participantId,
@@ -248,14 +280,30 @@ export async function runOptimization(
     maxTravelMinutes: input.maxTravelMinutes,
     topN: 5,
   });
+  // Distinguish routing-failure exclusions from genuinely unreachable
+  // places: when some route requests failed, an "Unreachable" exclusion
+  // may reflect the outage rather than the road network.
+  const annotatedExcluded =
+    routeFailures > 0
+      ? excluded.map((e) =>
+          e.reason.startsWith('Unreachable for:')
+            ? {
+                ...e,
+                reason: `${e.reason} Some route requests failed during this search, so this may be a routing problem rather than a truly unreachable place.`,
+              }
+            : e,
+        )
+      : excluded;
 
   return {
     ranked,
-    excluded,
+    excluded: annotatedExcluded,
     searchAreas,
     warnings,
     provider: deps.routingClient.kind === 'osrm' ? 'osrm' : 'demo',
-    generatedAt: now.toISOString(),
+    // Stamp at return time: a throttled run can take minutes, and the
+    // stale guard compares this against room changes after the search.
+    generatedAt: nowFn().toISOString(),
     meetingTimeISO: input.meetingTimeISO,
     preference: input.preference,
     category: input.category,
@@ -264,7 +312,9 @@ export async function runOptimization(
     decisionVersion: input.decisionVersion ?? null,
     participantsSignature: signatureFromOrigins(input.origins),
     stats: {
-      discovered: discovered.length,
+      // Post-dedup unique count: cross-area duplicates must not inflate
+      // the "places found" figure shown to the user.
+      discovered: unique.length,
       duplicatesRemoved,
       invalidRemoved,
       considered: considered.length,

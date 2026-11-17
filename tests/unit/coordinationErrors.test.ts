@@ -45,10 +45,18 @@ describe('inferCoordinationCode', () => {
   });
   it('falls back to HTTP status', () => {
     expect(inferCoordinationCode('boom', 410)).toBe('EXPIRED');
-    expect(inferCoordinationCode('boom', 409)).toBe('STALE_VERSION');
-    expect(inferCoordinationCode('boom', 403)).toBe('NOT_HOST');
-    expect(inferCoordinationCode('boom', 401)).toBe('NOT_MEMBER');
+    // Bare 409/403 are ambiguous (STALE_VERSION vs ALREADY_FINALIZED,
+    // NOT_HOST vs NOT_MEMBER) — Edge Functions send explicit codes.
+    expect(inferCoordinationCode('boom', 409)).toBe('UNKNOWN');
+    expect(inferCoordinationCode('boom', 403)).toBe('UNKNOWN');
+    expect(inferCoordinationCode('boom', 401)).toBe('UNAUTHORIZED');
     expect(inferCoordinationCode('boom', 500)).toBe('UNKNOWN');
+  });
+  it('maps unauthorized messages and strict membership phrases only', () => {
+    expect(inferCoordinationCode('Unauthorized.')).toBe('UNAUTHORIZED');
+    expect(inferCoordinationCode('You must join this room before voting.')).toBe('NOT_MEMBER');
+    // A bare "join" mention is not a membership error.
+    expect(inferCoordinationCode('Failed to join the request.')).toBe('UNKNOWN');
   });
 });
 

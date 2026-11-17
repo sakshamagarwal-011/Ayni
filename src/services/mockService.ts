@@ -24,6 +24,7 @@ import type { SubscriptionStatus } from '../coordination/reconnect';
 const STORE_KEY = 'meetsync-demo-rooms-v1';
 const CURRENT_KEY = 'meetsync-demo-current-v1';
 const NAME_KEY = 'meetsync-display-name-draft';
+const LAST_CODE_KEY = 'meetsync-last-code-hint';
 
 /**
  * Minimal key/value storage. The browser default is localStorage; tests
@@ -119,6 +120,23 @@ export function getDisplayNameDraft(): string {
     return defaultMockStorage().getItem(NAME_KEY) ?? '';
   } catch {
     return '';
+  }
+}
+
+/** Last invite code used in this browser (create/join hint for the Join form). */
+export function getLastCodeHint(): string | null {
+  try {
+    return defaultMockStorage().getItem(LAST_CODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setLastCodeHint(code: string): void {
+  try {
+    defaultMockStorage().setItem(LAST_CODE_KEY, code);
+  } catch {
+    // best-effort
   }
 }
 
@@ -243,9 +261,18 @@ export function purgeExpiredDemoRooms(storage?: MockStorage): { expired: number;
 export class MockRoomService implements RoomService {
   readonly mode = 'demo' as const;
   private readonly storage: MockStorage;
+  /**
+   * Per-browser identity storage (the current-participant map). In a
+   * real browser this is the same localStorage as the room store: one
+   * browser = one identity per room. Tests inject a SEPARATE identity
+   * store per service instance to simulate distinct browsers sharing
+   * one room store.
+   */
+  private readonly identityStorage: MockStorage;
 
-  constructor(storage?: MockStorage) {
+  constructor(storage?: MockStorage, identityStorage?: MockStorage) {
     this.storage = storage ?? defaultMockStorage();
+    this.identityStorage = identityStorage ?? this.storage;
     // Best-effort demo-only cleanup on load (localStorage only, no
     // network): mark expired rooms, prune rooms expired > 7 days ago.
     this.purgeBestEffort();
@@ -260,11 +287,11 @@ export class MockRoomService implements RoomService {
   }
 
   private loadCurrent(): Record<string, string> {
-    return loadCurrentFrom(this.storage);
+    return loadCurrentFrom(this.identityStorage);
   }
 
   private saveCurrent(map: Record<string, string>): void {
-    saveCurrentTo(this.storage, map);
+    saveCurrentTo(this.identityStorage, map);
   }
 
   private purgeBestEffort(): void {
@@ -313,7 +340,7 @@ export class MockRoomService implements RoomService {
         lat: input.location.lat,
         lng: input.location.lng,
         label: input.locationLabel.trim(),
-        accuracyM: 20,
+        accuracyM: input.accuracyM ?? 20,
         updatedAt: now,
         expiresAt: expires,
       },
@@ -343,6 +370,7 @@ export class MockRoomService implements RoomService {
     const current = this.loadCurrent();
     current[roomId] = hostId;
     this.saveCurrent(current);
+    setLastCodeHint(code);
     return structuredClone(detail);
   }
 
@@ -362,16 +390,37 @@ export class MockRoomService implements RoomService {
     }
     // Joining a finalized room is allowed (view-only); voting and
     // finalization stay guarded by the state machine.
-    const existing = stored.detail.participants.find(
-      (p) => p.displayName.toLowerCase() === input.displayName.trim().toLowerCase(),
-    );
+    //
+    // Identity is the per-browser current-participant map — NEVER the
+    // display name. Matching by name let a joiner adopt another
+    // participant (including the host) and silently dropped the
+    // submitted location. A browser that already joined this room
+    // rejoins as the SAME participant, with the submitted display name
+    // and location applied; a new browser always creates a new
+    // participant, even when the display name matches someone else.
+    const current = this.loadCurrent();
+    const existingId = current[stored.detail.room.id];
+    const existing = existingId
+      ? stored.detail.participants.find((p) => p.id === existingId)
+      : undefined;
     const now = new Date().toISOString();
     if (existing) {
-      const current = this.loadCurrent();
-      current[stored.detail.room.id] = existing.id;
-      this.saveCurrent(current);
+      existing.displayName = input.displayName.trim();
+      existing.lastSeenAt = now;
+      existing.location = {
+        id: existing.location?.id ?? newId('location'),
+        participantId: existing.id,
+        roomId: stored.detail.room.id,
+        lat: input.location.lat,
+        lng: input.location.lng,
+        label: input.locationLabel.trim(),
+        accuracyM: input.accuracyM ?? 20,
+        updatedAt: now,
+        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      };
       stored.detail.currentParticipantId = existing.id;
       this.saveStore(store);
+      setLastCodeHint(code);
       return structuredClone(stored.detail);
     }
     const pid = newId('participant');
@@ -393,7 +442,7 @@ export class MockRoomService implements RoomService {
         lat: input.location.lat,
         lng: input.location.lng,
         label: input.locationLabel.trim(),
-        accuracyM: 20,
+        accuracyM: input.accuracyM ?? 20,
         updatedAt: now,
         expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
       },
@@ -401,9 +450,9 @@ export class MockRoomService implements RoomService {
     stored.detail.participants.push(participant);
     stored.detail.currentParticipantId = pid;
     this.saveStore(store);
-    const current = this.loadCurrent();
     current[stored.detail.room.id] = pid;
     this.saveCurrent(current);
+    setLastCodeHint(code);
     return structuredClone(stored.detail);
   }
 
@@ -413,6 +462,9 @@ export class MockRoomService implements RoomService {
     this.purgeBestEffort();
     const store = this.loadStore();
     seedDemoRoomIfNeeded(store);
+    // Persist the seed: without this, the demo room gets a fresh id on
+    // every call and the current-participant map never matches it.
+    this.saveStore(store);
     const stored = store[normalized];
     if (!stored) return null;
     const current = this.loadCurrent();
@@ -453,7 +505,7 @@ export class MockRoomService implements RoomService {
       lat: input.lat,
       lng: input.lng,
       label: input.label.trim(),
-      accuracyM: 20,
+      accuracyM: input.accuracyM ?? 20,
       updatedAt: now,
       expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
     };
@@ -468,6 +520,12 @@ export class MockRoomService implements RoomService {
     if (!stored) throw new RoomServiceError('Room not found.');
     const p = stored.detail.participants.find((x) => x.id === participantId);
     if (!p) throw new RoomServiceError('Participant not found.');
+    // Caller check (mirrors confirmArrival): only the browser whose
+    // identity maps to this participant may toggle their readiness.
+    const current = this.loadCurrent();
+    if (current[roomId] !== participantId) {
+      throw new CoordinationError('NOT_MEMBER', 'You can only change your own readiness.');
+    }
     p.isReady = ready;
     p.lastSeenAt = new Date().toISOString();
     this.saveStore(store);
@@ -521,6 +579,12 @@ export class MockRoomService implements RoomService {
     const participant = stored.detail.participants.find((p) => p.id === participantId);
     if (!participant) {
       throw new CoordinationError('NOT_MEMBER', 'You are not a participant in this room.');
+    }
+    // Caller check (mirrors confirmArrival): only the browser whose
+    // identity maps to this participant may vote as them.
+    const current = this.loadCurrent();
+    if (current[roomId] !== participantId) {
+      throw new CoordinationError('NOT_MEMBER', 'You can only vote as yourself.');
     }
     const check = isActionAllowed(stored.detail.room.status, 'vote', {
       isMember: true,

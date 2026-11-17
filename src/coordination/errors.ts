@@ -14,6 +14,9 @@
  * - EXPIRED: the room (or its invite link) has expired.
  * - OFFLINE: the device is offline / the live connection is down.
  * - VOTE_FAILED: the ranking was invalid or could not be saved.
+ * - UNAUTHORIZED: no valid session (HTTP 401). Distinct from NOT_MEMBER:
+ *   the caller is not authenticated at all, not merely outside the room.
+ * - NOT_FINALIZED: the action requires a finalized meeting (e.g. arrival).
  * - UNKNOWN: anything else; the message is still user-safe.
  */
 
@@ -25,6 +28,8 @@ export type CoordinationErrorCode =
   | 'EXPIRED'
   | 'OFFLINE'
   | 'VOTE_FAILED'
+  | 'UNAUTHORIZED'
+  | 'NOT_FINALIZED'
   | 'UNKNOWN';
 
 const CODES: ReadonlySet<string> = new Set([
@@ -35,6 +40,8 @@ const CODES: ReadonlySet<string> = new Set([
   'EXPIRED',
   'OFFLINE',
   'VOTE_FAILED',
+  'UNAUTHORIZED',
+  'NOT_FINALIZED',
   'UNKNOWN',
 ]);
 
@@ -63,15 +70,28 @@ export function inferCoordinationCode(message: string, status?: number): Coordin
     return 'STALE_VERSION';
   }
   if (lower.includes('only the host')) return 'NOT_HOST';
-  if (lower.includes('not a member') || lower.includes('not a participant') || lower.includes('join')) {
+  // Strict membership phrases only: a bare "join" matched unrelated
+  // messages (e.g. "Failed to join room" 500s) as NOT_MEMBER.
+  if (
+    lower.includes('not a member') ||
+    lower.includes('not a participant') ||
+    lower.includes('must join') ||
+    lower.includes('join this room') ||
+    lower.includes('join the room') ||
+    lower.includes('join first')
+  ) {
     return 'NOT_MEMBER';
   }
+  if (lower.includes('unauthorized') || lower.includes('unauthenticated')) return 'UNAUTHORIZED';
   if (lower.includes('offline')) return 'OFFLINE';
   if (lower.includes('vote') || lower.includes('ranking')) return 'VOTE_FAILED';
   if (status === 410) return 'EXPIRED';
-  if (status === 409) return 'STALE_VERSION';
-  if (status === 403) return 'NOT_HOST';
-  if (status === 401) return 'NOT_MEMBER';
+  // 401 means "not authenticated", not "not a member".
+  if (status === 401) return 'UNAUTHORIZED';
+  // 403/409 are ambiguous without a message: 403 is NOT_HOST or
+  // NOT_MEMBER, 409 is STALE_VERSION or ALREADY_FINALIZED. The Edge
+  // Functions always send an explicit code for these; inferring one
+  // here would misclassify the other case.
   return 'UNKNOWN';
 }
 

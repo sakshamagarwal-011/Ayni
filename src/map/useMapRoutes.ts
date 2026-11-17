@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { hasFreshLocation } from '../coordination/expiry';
 import { buildRouteEstimate } from '../lib/distance';
 import type { MeetingSpot, Participant, RouteSource, TravelMode } from '../types';
 import { getMapConfig } from './config';
@@ -44,7 +45,7 @@ const DEBOUNCE_MS = 300;
 /** Stable signature so refetches happen only when inputs actually change. */
 function signature(participants: Participant[], spot: MeetingSpot | null, mode: TravelMode): string {
   const parts = participants
-    .filter((p) => p.location)
+    .filter((p) => hasFreshLocation(p))
     .map((p) => `${p.id}:${p.location!.lat.toFixed(5)},${p.location!.lng.toFixed(5)},${p.location!.expiresAt}`)
     .sort()
     .join('|');
@@ -67,7 +68,11 @@ export function useMapRoutes(
 
   useEffect(() => {
     const config = getMapConfig();
-    const withLocation = participants.filter((p) => p.location);
+    // Freshness filter: expired locations get no route lines, no legend
+    // entries, and their stale coordinates are never sent to OSRM.
+    // Computed here (and in the signature) so a re-render after an
+    // expiry — see the expiry timer in useRoomDetail — drops the routes.
+    const withLocation = participants.filter((p) => hasFreshLocation(p));
     if (!spot || withLocation.length === 0 || !config.routingEnabled || config.routingProvider === 'off') {
       setRoutes([]);
       setStatus('idle');
@@ -77,6 +82,11 @@ export function useMapRoutes(
 
     const controller = new AbortController();
     let cancelled = false;
+    // A new fetch means the previous spot/mode's routes are stale: clear
+    // them (and the fallback flag) instead of showing them as current
+    // while the refetch is in flight.
+    setRoutes([]);
+    setHadFallback(false);
     setStatus('loading');
 
     const timer = setTimeout(() => {
@@ -166,8 +176,13 @@ export function useMapRoutes(
 
   const source: RouteSource = useMemo(() => {
     if (routes.length === 0) return 'mock';
-    if (routes.some((r) => r.geometry.source === 'osrm')) return 'osrm';
-    if (routes.some((r) => r.geometry.source === 'estimated')) return 'estimated';
+    const hasOsrm = routes.some((r) => r.geometry.source === 'osrm');
+    const hasEstimated = routes.some((r) => r.geometry.source === 'estimated');
+    // Mixed OSRM + fallback sets must not be labelled pure OSRM: report
+    // the conservative 'estimated' provenance (hadFallback is also true
+    // for these sets, and per-route labels stay exact in the legend).
+    if (hasOsrm && !hasEstimated) return 'osrm';
+    if (hasEstimated) return 'estimated';
     return 'mock';
   }, [routes]);
 

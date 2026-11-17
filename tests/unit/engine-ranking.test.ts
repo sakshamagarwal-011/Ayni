@@ -91,6 +91,30 @@ describe('rankCandidates', () => {
     expect(ranked.map((r) => r.candidate.name)).toEqual(['Alpha', 'Zulu']);
   });
 
+  it('breaks score/max/total ties by spread (stdDev) before name', () => {
+    // Three origins: both candidates have minimax score 30 and total
+    // 60, but "Spread" is fairer (stdDev ~7.07) than "Skewed" (~8.16).
+    const origins = [...ORIGINS, origin('p3', 'Rohan')];
+    const a = place('node/1', 'Skewed');
+    const b = place('node/2', 'Spread');
+    const { ranked } = rankCandidates({
+      candidates: [a, b],
+      resultsByCandidate: resultsMap([
+        [
+          'node/1',
+          [result('p1', 'node/1', 10), result('p2', 'node/1', 20), result('p3', 'node/1', 30)],
+        ],
+        [
+          'node/2',
+          [result('p1', 'node/2', 15), result('p2', 'node/2', 15), result('p3', 'node/2', 30)],
+        ],
+      ]),
+      origins,
+      preference: 'minimax',
+    });
+    expect(ranked.map((r) => r.candidate.name)).toEqual(['Spread', 'Skewed']);
+  });
+
   it('excludes candidates unreachable for any REQUIRED participant, with reasons', () => {
     const a = place('node/1', 'Reachable');
     const b = place('node/2', 'Unreachable');

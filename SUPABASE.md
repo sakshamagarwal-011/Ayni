@@ -35,6 +35,8 @@ Migrations live in `supabase/migrations/` and must be applied **in filename orde
 | `20251117000003_0003_realtime_expiry.sql` | Realtime publication, location-expiry trigger, cleanup functions |
 | `20251117000004_0004_no_seed.sql` | Seed-free guardrail (verifies RLS is enabled; inserts nothing) |
 | `20251117000005_0005_coordination.sql` | Coordination: `decision_version` + `finalized_at` on rooms, `arrived_at` on participants, `expire_rooms()`, Realtime adds for `votes` + `participant_locations` |
+| `20251117000006_0006_audit_hardening.sql` | Audit hardening: revoke RPC `EXECUTE` on the `SECURITY DEFINER` cleanup/expire functions from `public`/`anon`/`authenticated` (service_role + postgres only); votes validity trigger + unique `(room_id, participant_id, rank)`; atomic `replace_votes()` RPC; expired locations hidden from the member `SELECT` policy |
+| `20251117000007_0007_scooter_mode.sql` | Allow `scooter` in the `route_estimates` mode CHECK (`bike` retained only so pre-existing rows stay valid; the app no longer emits it) |
 
 **Option A — Supabase CLI (recommended):**
 
@@ -132,10 +134,10 @@ Restart `npm run dev`. The header badge changes from Demo mode to **Live · Supa
 
 ## 10. Location expiration & cleanup
 
-- Every `participant_locations` row expires 2 hours after its last update (DB trigger in migration 0003).
+- Every `participant_locations` row expires 2 hours after its last update (DB trigger in migration 0003). Since migration 0006, expired rows are also invisible to members via RLS (`expires_at > now()` in the `SELECT` policy) — clients read them as "no location" until the member refreshes.
 - Expired rows are deleted by **one** of:
-  - **Option A (preferred):** Supabase Scheduled Functions invoking `cleanup-expired-locations` every 15 minutes with header `x-cron-secret: <CLEANUP_SECRET>`. Configure in Dashboard → **Edge Functions → Schedules** (or via `supabase functions deploy` + the dashboard cron UI), pointing at the function URL with that header.
-  - **Option B:** `pg_cron` calling `select public.delete_expired_locations();` — see the commented example in migration 0003. (Option B only deletes locations; it does not mark rooms expired or prune old rooms — prefer Option A.)
+  - **Option A (preferred):** Supabase Scheduled Functions invoking `cleanup-expired-locations` every 15 minutes with header `x-cron-secret: <CLEANUP_SECRET>`. Configure in Dashboard → **Edge Functions → Schedules** (or via `supabase functions deploy` + the dashboard cron UI), pointing at the function URL with that header. The function has `verify_jwt = false` in `supabase/config.toml` (a scheduled job has no user JWT); the `x-cron-secret` check inside the function remains the auth — do not remove it.
+  - **Option B:** `pg_cron` calling `select public.delete_expired_locations();` — see the commented example in migration 0003. (Option B only deletes locations; it does not mark rooms expired or prune old rooms — prefer Option A.) Migration 0006 grants the cleanup functions to `postgres` so pg_cron callers keep working.
 - The cleanup function also marks past-`expires_at` non-finalized rooms `expired` (via `expire_rooms()`, migration 0005; finalized rooms are never auto-expired for display) and prunes expired/finalized rooms whose `expires_at` is older than the retention cutoff — default 7 days, configurable via the `CLEANUP_RETENTION_DAYS` Edge Function secret (1–90). It never deletes non-expired rooms. It returns `{ deletedLocations, expiredRooms, prunedRooms, retentionDays }` for log inspection.
 
 ## Troubleshooting

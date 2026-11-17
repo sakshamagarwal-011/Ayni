@@ -97,9 +97,10 @@ Worked example — durations 10, 20, 30 minutes:
 - balanced = 0.4×20 + 0.4×30 + 0.2×8.165 = 8 + 12 + 1.633 ≈ **21.633**
 
 Ranking tie-breaks (all strategies): score, then max, then total,
-then candidate name (alphabetical). The top 5 are returned; the rest
-are neither ranked nor "excluded" — only true exclusions (unreachable
-/ over-limit) appear in the excluded list, with reasons.
+then spread (stdDev), then candidate name (alphabetical). The top 5
+are returned; the rest are neither ranked nor "excluded" — only true
+exclusions (unreachable / over-limit) appear in the excluded list,
+with reasons.
 
 ## The straight-line boundary (read this before changing the engine)
 
@@ -135,18 +136,30 @@ and returns no ranked results.
   verified live from this environment — see TESTING.md §7 for how to
   verify it.
 - Fair use: one sequential POST per search area (max 3 areas), capped
-  result counts (default 30/area, max 50), 25s query timeout, no
-  polling, no parallel area queries. Responses are cached 10 minutes
+  result counts (default 30/area, max 50), query timeout derived from
+  the client timeout (25s default, clamped 5–180s), no polling, no
+  parallel area queries. Responses are cached 10 minutes
   (query-string key) and concurrent identical searches share one
-  in-flight request.
+  in-flight request. The Overpass client is shared (one instance per
+  endpoint/timeout) so the cache actually hits across searches.
 - Retries: at most one retry, only on 429/504, honouring `Retry-After`
   capped at 30s.
 - Query shape: `node`/`way`/`relation` per tag filter inside
   `around:<radius>,<lat>,<lng>`, `out center <limit>`. Ways/relations
-  contribute their centre point. Elements without a name or without
-  finite coordinates are dropped (counted in `stats.invalidRemoved`).
+  contribute their centre point. Every clause requires `["name"]` so
+  unnamed elements never consume the capped result set; elements
+  without finite coordinates are dropped (counted in
+  `stats.invalidRemoved`).
+- Categories: café, restaurant, bar/pub, park, library, coworking,
+  fast food, mall (`shop=mall`), metro station
+  (`railway=station` + `station=subway`/`light_rail`), railway
+  station (`railway=station`), marketplace
+  (`amenity=marketplace`), tea stall (`cafe`/`fast_food` with
+  `cuisine=tea`). `any` is the union of all category filters.
 - Identity/dedup: OSM type+id. The same place appearing in two
-  overlapping areas is routed once.
+  overlapping areas is routed once. `stats.discovered` counts unique
+  places after dedup; `generatedAt` is stamped when the run returns,
+  not when it starts.
 
 ### OSRM (routing)
 
@@ -156,10 +169,12 @@ and returns no ranked results.
   **strict** variants (`fetchRouteStrict`), which return `null` on
   failure instead of falling back.
 - Batching: (origin, candidate) pairs are deduplicated by rounded
-  coords + profile, then grouped by OSRM profile (bike → driving →
-  foot order is incidental to sorting; grouping only keeps same-profile
+  coords + profile, then grouped by OSRM profile (driving → foot
+  order is incidental to sorting; grouping only keeps same-profile
   requests adjacent). Profiles: car → driving, walk → foot,
-  bike → bike, transit → driving (labelled as an approximation —
+  scooter → driving (no motorcycle profile on the demo server —
+  scooter times are car-profile road times, never labelled
+  otherwise), transit → driving (labelled as an approximation —
   OSRM has no transit routing).
 - Budget: `VITE_OPTIMIZATION_MAX_OSRM_REQUESTS` (default 60 unique
   pairs). Exceeding it aborts with `EngineQuotaError` **before** any
@@ -185,13 +200,12 @@ message. Defaults (no env vars) are demo: zero external calls.
 
 - **Membership:** the runner must be a room member and every origin
   must belong to a member. Non-members are rejected by name.
-- **Consent:** every *required* origin must have `consentGiven`. In
-  the UI, the runner ticks an explicit checkbox (their coordinates
-  leave the browser to Overpass/OSRM in live mode). Other room
-  members consented by sharing a location in the room for the purpose
-  of meeting-point search — this room consent model is stated in the
-  panel copy and here. Optional participants may lack consent; they
-  are reported but never exclude a candidate.
+- **Consent:** EVERY origin must have `consentGiven` — required or
+  not — because every origin feeds search areas and OSRM routing
+  (coordinates leave the browser in live mode). In the UI, the runner
+  ticks an explicit checkbox. Other room members consented by sharing
+  a location in the room for the purpose of meeting-point search —
+  this room consent model is stated in the panel copy and here.
 - **Coordinates/freshness:** finite lat/lng in range; expired
   locations (2-hour expiry, same as Phase 2) are rejected and named.
   Required participants without an origin reject the run — locations

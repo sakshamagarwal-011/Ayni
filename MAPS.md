@@ -81,13 +81,14 @@ All variables are optional. Defaults work with zero new env vars
 | `VITE_ROUTING_PROVIDER` | `mock` | `osrm` (live dev routing), `mock` (demo estimates, no network), `off` (no route lines). |
 | `VITE_ROUTING_ENABLED` | `true` | Master switch; `false` disables route lines entirely. |
 | `VITE_OSRM_BASE_URL` | `https://router.project-osrm.org` | OSRM endpoint. Point at a self-hosted instance for production. |
-| `VITE_OSRM_MIN_INTERVAL_MS` | `1100` | Minimum gap between OSRM request starts. Only lower for your own server. |
+| `VITE_OSRM_MIN_INTERVAL_MS` | `1100` | Minimum gap between OSRM request starts. Floored at 1000ms against the default demo server (a typo must never disable throttling there); only lower for your own server. |
 | `VITE_OSRM_TIMEOUT_MS` | `10000` | Per-request timeout. |
-| `VITE_OSRM_CACHE_TTL_MS` | `600000` | In-memory route cache TTL (10 min). |
-| `VITE_MAP_3D_ENABLED` | `true` | Attempt 3D building extrusion where the style supports it. |
+| `VITE_OSRM_CACHE_TTL_MS` | `600000` | In-memory route cache TTL (10 min). `0` means "never expire" — set deliberately only. |
+| `VITE_MAP_3D_ENABLED` | `true` | Master switch for 3D building extrusion: `false` disables the layer and the toggle, not just the initial state. |
 
 See `.env.example` for a commented copy-paste block. Invalid values
-fall back to defaults (see `tests/unit/mapConfig.test.ts`).
+fall back to defaults with a dev-only `console.warn` naming the
+variable (see `mapConfigWarnings` and `tests/unit/mapConfig.test.ts`).
 
 ## Tile / style provider: OpenFreeMap
 
@@ -133,7 +134,7 @@ fall back to defaults (see `tests/unit/mapConfig.test.ts`).
 ## Routing: OSRM (development only)
 
 - **Endpoint:** `https://router.project-osrm.org` (FOSSGIS-sponsored
-  demo server, worldwide car/foot/bike profiles). **Opt-in only:**
+  demo server, worldwide car/foot profiles). **Opt-in only:**
   set `VITE_ROUTING_PROVIDER=osrm`. The default (`mock`) makes zero
   OSRM requests.
 - **Usage policy (demo server):** reasonable, non-commercial use only;
@@ -142,7 +143,11 @@ fall back to defaults (see `tests/unit/mapConfig.test.ts`).
   by design — see below. The policy text is published by the OSRM
   project (Demo server wiki page); re-check it before relying on the
   demo server for anything beyond local development.
-- **Profiles:** `car → driving`, `walk → foot`, `bike → bike`.
+- **Profiles:** `car → driving`, `walk → foot`,
+  `scooter → driving`. Scooter means two-wheeler (user choice; there
+  is no bicycle mode). The demo server has **no motorcycle profile**,
+  so scooter routes on the driving profile — the closest available.
+  Never label scooter results as motorcycle-specific routing.
   **Transit has no OSRM profile:** transit requests use the driving
   profile and are labelled as an approximation in the UI
   ("driving profile — no transit routing"). Never present them as
@@ -159,6 +164,12 @@ fall back to defaults (see `tests/unit/mapConfig.test.ts`).
     recovered server is retried promptly.
   - 10s timeout per request (AbortController), single attempt, no
     retries.
+  - Circuit breaker: after 3 consecutive failures the client fails
+    fast for 30s instead of issuing requests that will hang/time out
+    one by one through a whole batch. A manual cache clear resets it.
+    The optimization engine additionally enforces a 5-minute overall
+    routing deadline per search (remaining pairs count as failures
+    and are reported, never silently dropped).
   - Screens fetch only what is visible: the selected spot + selected
     mode (max ~4 requests per screen, usually cached). Never all
     participant × spot × mode combinations.

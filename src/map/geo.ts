@@ -27,7 +27,10 @@ function toPoints(coords: Coordinates[]) {
 export function boundsForPoints(coords: Coordinates[]): LngLatBounds | null {
   if (coords.length === 0) return null;
   const [west, south, east, north] = bbox(toPoints(coords));
-  if (coords.length === 1) {
+  // Expand degenerate bounds whenever the box has zero width or height
+  // — not just the single-point case: two friends on the same preset
+  // (or due north/south of each other) otherwise over-zoom to maxZoom.
+  if (coords.length === 1 || west === east || south === north) {
     return [
       west - SINGLE_POINT_PAD_DEG,
       south - SINGLE_POINT_PAD_DEG,

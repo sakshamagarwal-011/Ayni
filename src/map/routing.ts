@@ -13,6 +13,9 @@ import { straightLineGeometry } from './geo';
  *   switches and re-renders do not re-request the same route.
  * - 10s timeout, AbortController cancellation, single attempt only —
  *   no retries, no retry storms.
+ * - Circuit breaker: after 3 consecutive failures the client fails
+ *   fast for 30s instead of issuing requests that will hang/time out
+ *   one by one through a whole batch. A manual cache clear resets it.
  * - On ANY failure (429, 5xx, network error, timeout, bad payload) the
  *   caller gets a deterministic haversine fallback labelled
  *   'estimated' — the UI never blocks on routing. The optimization
@@ -29,7 +32,7 @@ import { straightLineGeometry } from './geo';
  *   anything beyond light development use. See MAPS.md.
  */
 
-export type OsrmProfile = 'driving' | 'foot' | 'bike';
+export type OsrmProfile = 'driving' | 'foot';
 
 export interface RouteGeometry {
   /** [lng, lat] pairs in GeoJSON order. */
@@ -37,7 +40,7 @@ export interface RouteGeometry {
   distanceM: number;
   durationMin: number;
   source: RouteSource;
-  /** OSRM profile used ('driving' | 'foot' | 'bike'), or 'estimate' for fallbacks. */
+  /** OSRM profile used ('driving' | 'foot'), or 'estimate' for fallbacks. */
   profile: string;
   /** True when the driving profile stood in for transit (OSRM has no transit). */
   transitApproximation: boolean;
@@ -48,13 +51,20 @@ export interface ProfileMapping {
   transitApproximation: boolean;
 }
 
-/** Map app travel modes to OSRM demo-server profiles. Transit has no OSRM profile. */
+/**
+ * Map app travel modes to OSRM demo-server profiles. Transit has no
+ * OSRM profile. Scooter (two-wheeler) also has none: the public demo
+ * server offers no motorcycle profile, so scooter routes on the
+ * driving profile — the closest available. This is NOT a
+ * motorcycle-specific profile, and scooter times are car-profile road
+ * times; see MAPS.md. Do not label it otherwise.
+ */
 export function profileForMode(mode: TravelMode): ProfileMapping {
   switch (mode) {
     case 'walk':
       return { profile: 'foot', transitApproximation: false };
-    case 'bike':
-      return { profile: 'bike', transitApproximation: false };
+    case 'scooter':
+      return { profile: 'driving', transitApproximation: false };
     case 'transit':
       return { profile: 'driving', transitApproximation: true };
     case 'car':
@@ -164,6 +174,10 @@ export interface OsrmClientOptions {
   cacheTtlMs: number;
   fetchFn?: FetchLike;
   now?: () => number;
+  /** Consecutive failures before the circuit opens (default 3). 0 disables the breaker. */
+  circuitBreakerThreshold?: number;
+  /** How long the circuit stays open before a retry is allowed (default 30s). */
+  circuitBreakerCooldownMs?: number;
 }
 
 const MAX_CACHE_ENTRIES = 200;
@@ -223,6 +237,36 @@ export function createOsrmClient(options: OsrmClientOptions): OsrmClient {
   let lastRequestStart = 0;
   // Serial queue: every request chains onto the previous one.
   let queue: Promise<unknown> = Promise.resolve();
+  // Circuit breaker: after N consecutive failures, fail fast (fallback
+  // / null) without issuing network requests until the cooldown passes,
+  // so a hung OSRM server cannot stall a whole batch request-by-request.
+  const breakerThreshold = options.circuitBreakerThreshold ?? 3;
+  const breakerCooldownMs = options.circuitBreakerCooldownMs ?? 30_000;
+  let consecutiveFailures = 0;
+  let breakerOpenedAt = 0;
+
+  function breakerOpen(): boolean {
+    if (breakerThreshold <= 0 || consecutiveFailures < breakerThreshold) return false;
+    if (now() - breakerOpenedAt >= breakerCooldownMs) {
+      // Cooldown elapsed: allow one probe request (half-open).
+      consecutiveFailures = 0;
+      breakerOpenedAt = 0;
+      return false;
+    }
+    return true;
+  }
+
+  function recordSuccess(): void {
+    consecutiveFailures = 0;
+    breakerOpenedAt = 0;
+  }
+
+  function recordFailure(): void {
+    consecutiveFailures += 1;
+    if (breakerThreshold > 0 && consecutiveFailures >= breakerThreshold && breakerOpenedAt === 0) {
+      breakerOpenedAt = now();
+    }
+  }
 
   function cached(key: string): RouteGeometry | null {
     const entry = cache.get(key);
@@ -252,7 +296,16 @@ export function createOsrmClient(options: OsrmClientOptions): OsrmClient {
     const { profile, transitApproximation } = profileForMode(mode);
     const key = routeCacheKey(from, to, profile);
     const hit = cached(key);
-    if (hit) return hit;
+    if (hit) {
+      // Cache keys are profile-only (the orchestrator relies on this
+      // for dedup), so a car fetch and a transit fetch share an entry.
+      // Re-derive the transit flag from the CURRENT mode so a cached
+      // car result is never labelled as a transit route, or vice versa.
+      return { ...hit, transitApproximation };
+    }
+    if (breakerOpen()) {
+      return allowFallback ? fallbackGeometry(from, to, mode) : null;
+    }
 
     // Enforce the minimum gap between request starts.
     const waitMs = Math.max(0, lastRequestStart + options.minIntervalMs - now());
@@ -268,11 +321,18 @@ export function createOsrmClient(options: OsrmClientOptions): OsrmClient {
       const response = await fetchFn(buildOsrmUrl(options.baseUrl, profile, from, to), {
         signal: controller.signal,
       });
-      if (!response.ok) return allowFallback ? fallbackGeometry(from, to, mode) : null;
+      if (!response.ok) {
+        recordFailure();
+        return allowFallback ? fallbackGeometry(from, to, mode) : null;
+      }
       const payload = await response.json();
       const parsed = parseOsrmRoute(payload, profile, transitApproximation);
-      if (!parsed) return allowFallback ? fallbackGeometry(from, to, mode) : null;
+      if (!parsed) {
+        recordFailure();
+        return allowFallback ? fallbackGeometry(from, to, mode) : null;
+      }
       const geometry = parsed;
+      recordSuccess();
       // Cache OSRM successes only; fallbacks are cheap to recompute and
       // must not mask a recovered server for the full TTL.
       store(key, geometry);
@@ -283,6 +343,9 @@ export function createOsrmClient(options: OsrmClientOptions): OsrmClient {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       }
       void err;
+      // Timeouts and network errors count towards the breaker; an
+      // external abort (rethrown above) never does.
+      recordFailure();
       return allowFallback ? fallbackGeometry(from, to, mode) : null;
     } finally {
       clearTimeout(timeout);
@@ -332,6 +395,10 @@ export function createOsrmClient(options: OsrmClientOptions): OsrmClient {
     },
     clearCache() {
       cache.clear();
+      // A manual refresh is an explicit retry: reset the breaker so the
+      // next request actually probes the server again.
+      consecutiveFailures = 0;
+      breakerOpenedAt = 0;
     },
     cacheSize() {
       return cache.size;

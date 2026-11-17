@@ -29,6 +29,15 @@ export const CATEGORY_TAGS: Record<MeetingCategory, string[]> = {
   library: ['["amenity"="library"]'],
   coworking: ['["office"="coworking"]'],
   fastFood: ['["amenity"="fast_food"]'],
+  mall: ['["shop"="mall"]'],
+  // Metro stations are railway stations with a subway/light-rail
+  // station tag. railwayStation below matches ALL stations (including
+  // metro ones) — overlap is intentional, like bar including pubs.
+  metroStation: ['["railway"="station"]["station"="subway"]', '["railway"="station"]["station"="light_rail"]'],
+  railwayStation: ['["railway"="station"]'],
+  marketplace: ['["amenity"="marketplace"]'],
+  // Tea stalls are cafes/fast-food places whose cuisine is tea.
+  teaStall: ['["amenity"="cafe"]["cuisine"="tea"]', '["amenity"="fast_food"]["cuisine"="tea"]'],
   any: [
     '["amenity"="cafe"]',
     '["amenity"="restaurant"]',
@@ -38,6 +47,13 @@ export const CATEGORY_TAGS: Record<MeetingCategory, string[]> = {
     '["leisure"="park"]',
     '["amenity"="library"]',
     '["office"="coworking"]',
+    '["shop"="mall"]',
+    '["railway"="station"]["station"="subway"]',
+    '["railway"="station"]["station"="light_rail"]',
+    '["railway"="station"]',
+    '["amenity"="marketplace"]',
+    '["amenity"="cafe"]["cuisine"="tea"]',
+    '["amenity"="fast_food"]["cuisine"="tea"]',
   ],
 };
 
@@ -45,17 +61,30 @@ export function categoryLabelForTags(tags: Record<string, string>): string {
   const amenity = tags.amenity;
   const leisure = tags.leisure;
   const office = tags.office;
+  const shop = tags.shop;
+  const railway = tags.railway;
+  const station = tags.station;
+  const cuisine = tags.cuisine;
+  // Tea stalls first: a cafe/fast-food place with cuisine=tea is a
+  // tea stall, not a generic café.
+  if ((amenity === 'cafe' || amenity === 'fast_food') && cuisine === 'tea') return 'Tea stall';
   if (amenity === 'cafe') return 'Café';
   if (amenity === 'restaurant') return 'Restaurant';
   if (amenity === 'bar') return 'Bar';
   if (amenity === 'pub') return 'Pub';
   if (amenity === 'fast_food') return 'Fast food';
   if (amenity === 'library') return 'Library';
+  if (amenity === 'marketplace') return 'Marketplace';
   if (leisure === 'park') return 'Park';
   if (office === 'coworking') return 'Coworking';
+  if (shop === 'mall') return 'Mall';
+  if (railway === 'station' && (station === 'subway' || station === 'light_rail')) return 'Metro station';
+  if (railway === 'station') return 'Railway station';
   if (amenity) return amenity.replace(/_/g, ' ');
   if (leisure) return leisure.replace(/_/g, ' ');
   if (office) return office.replace(/_/g, ' ');
+  if (shop) return shop.replace(/_/g, ' ');
+  if (railway) return railway.replace(/_/g, ' ');
   return 'Place';
 }
 
@@ -64,18 +93,27 @@ function formatCoord(n: number): string {
 }
 
 /** Build an Overpass QL query for one search area + category. `limit` is clamped to [1, 50]. */
-export function buildOverpassQuery(area: SearchArea, category: MeetingCategory, limit: number): string {
+export function buildOverpassQuery(
+  area: SearchArea,
+  category: MeetingCategory,
+  limit: number,
+  timeoutSeconds: number = OVERPASS_TIMEOUT_SECONDS,
+): string {
   const capped = Math.min(MAX_OVERPASS_RESULTS, Math.max(1, Math.floor(limit)));
   const radiusM = Math.round(area.radiusKm * 1000);
   const filters = CATEGORY_TAGS[category];
   const clauses: string[] = [];
+  const qlTimeout = Math.min(180, Math.max(5, Math.floor(timeoutSeconds)));
   for (const filter of filters) {
     for (const kind of ['node', 'way', 'relation'] as const) {
-      clauses.push(`  ${kind}${filter}(around:${radiusM},${formatCoord(area.centerLat)},${formatCoord(area.centerLng)});`);
+      // ["name"] filters unnamed elements server-side: without it the
+      // result cap is consumed by unusable unnamed objects that the
+      // parser then drops (crowding out named places).
+      clauses.push(`  ${kind}${filter}["name"](around:${radiusM},${formatCoord(area.centerLat)},${formatCoord(area.centerLng)});`);
     }
   }
   return (
-    `[out:json][timeout:${OVERPASS_TIMEOUT_SECONDS}];\n` +
+    `[out:json][timeout:${qlTimeout}];\n` +
     `(\n${clauses.join('\n')}\n);\n` +
     `out center ${capped};`
   );

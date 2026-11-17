@@ -166,12 +166,16 @@ export class SupabaseRoomService implements RoomService {
         lat: input.location.lat,
         lng: input.location.lng,
         label: input.locationLabel,
+        ...(input.accuracyM != null ? { accuracyM: input.accuracyM } : {}),
       },
     });
-    if (error) throw new RoomServiceError(error.message);
-    const payload = data as { inviteCode?: string; error?: string };
+    if (error) {
+      const parsed = await parseEdgeFunctionError(error);
+      throw coordinationErrorFromEdge(parsed, 'Failed to create room.');
+    }
+    const payload = data as { inviteCode?: string; error?: string; code?: unknown };
     if (payload?.error || !payload?.inviteCode) {
-      throw new RoomServiceError(payload?.error ?? 'Failed to create room.');
+      throw this.payloadError(payload, 'Failed to create room.');
     }
     setNameDraft(input.displayName);
     setLastCodeHint(payload.inviteCode);
@@ -197,18 +201,30 @@ export class SupabaseRoomService implements RoomService {
     }
     const payload = data as { room?: { id: string }; error?: string; code?: unknown };
     if (payload?.error || !payload?.room) {
-      if (payload?.error && payload.error.toLowerCase().includes('expired')) {
-        throw new CoordinationError('EXPIRED', payload.error);
+      // RoomNotFoundError ONLY for the actual not-found message: other
+      // payload errors (e.g. 500s) must not be masked as a bad code.
+      if (payload?.error && /no meeting room found/i.test(payload.error)) {
+        throw new RoomNotFoundError(code);
       }
-      throw new RoomNotFoundError(code);
+      if (payload?.error) throw this.payloadError(payload, 'Failed to join room.');
+      throw new RoomServiceError('Failed to join room.');
     }
     // Join does not carry location; update it via its own Edge Function.
     // Joining a finalized room is allowed (view-only); location updates
     // are permitted in finalized rooms for navigation.
     const { error: locError } = await supabase.functions.invoke('update-location', {
-      body: { roomId: payload.room.id, lat: input.location.lat, lng: input.location.lng, label: input.locationLabel },
+      body: {
+        roomId: payload.room.id,
+        lat: input.location.lat,
+        lng: input.location.lng,
+        label: input.locationLabel,
+        ...(input.accuracyM != null ? { accuracyM: input.accuracyM } : {}),
+      },
     });
-    if (locError) throw new RoomServiceError(`Joined, but location update failed: ${locError.message}`);
+    if (locError) {
+      const parsed = await parseEdgeFunctionError(locError);
+      throw coordinationErrorFromEdge(parsed, 'Joined, but the location update failed.');
+    }
     setNameDraft(input.displayName);
     setLastCodeHint(code);
     const detail = await this.getRoomByCode(code);
@@ -311,23 +327,45 @@ export class SupabaseRoomService implements RoomService {
     await this.ensureAuth();
     const supabase = this.requireClient();
     const { data, error } = await supabase.functions.invoke('update-location', {
-      body: { roomId: input.roomId, lat: input.lat, lng: input.lng, label: input.label },
+      body: {
+        roomId: input.roomId,
+        lat: input.lat,
+        lng: input.lng,
+        label: input.label,
+        ...(input.accuracyM != null ? { accuracyM: input.accuracyM } : {}),
+      },
     });
-    if (error) throw new RoomServiceError(error.message);
-    const payload = data as { error?: string } | null;
-    if (payload?.error) throw new RoomServiceError(payload.error);
+    if (error) {
+      const parsed = await parseEdgeFunctionError(error);
+      throw coordinationErrorFromEdge(parsed, 'Failed to update location.');
+    }
+    const payload = data as { error?: string; code?: unknown } | null;
+    if (payload?.error) throw this.payloadError(payload, 'Failed to update location.');
   }
 
   async setReady(roomId: string, participantId: string, ready: boolean): Promise<void> {
     const { userId } = await this.ensureAuth();
     const supabase = this.requireClient();
-    void roomId;
-    const { error } = await supabase
+    const detail = await this.getRoomDetail(roomId);
+    if (!detail) throw new RoomServiceError('Room not found.');
+    const participant = detail.participants.find((p) => p.id === participantId);
+    if (!participant || participant.authUid !== userId) {
+      throw new CoordinationError('NOT_MEMBER', 'You can only change your own readiness.');
+    }
+    if (isRoomExpired(detail.room)) {
+      throw new CoordinationError('EXPIRED', 'This meeting has expired.');
+    }
+    const { data, error } = await supabase
       .from('participants')
       .update({ is_ready: ready, last_seen_at: new Date().toISOString() })
       .eq('id', participantId)
-      .eq('auth_uid', userId);
+      .eq('room_id', roomId)
+      .eq('auth_uid', userId)
+      .select('id');
     if (error) throw new RoomServiceError(error.message);
+    if (!data || data.length === 0) {
+      throw new CoordinationError('NOT_MEMBER', 'You can only change your own readiness.');
+    }
   }
 
   async confirmArrival(roomId: string, participantId: string, arrived: boolean): Promise<void> {
@@ -399,29 +437,45 @@ export class SupabaseRoomService implements RoomService {
     if (issues.length > 0) {
       throw new CoordinationError('VOTE_FAILED', issues.join(' '));
     }
-    // One active ranking: delete the previous votes, then insert the
-    // new ranking. RLS (owns_participant) enforces self-only writes
-    // server-side as well.
-    const { error: delError } = await supabase.from('votes').delete().eq('participant_id', participantId).eq('room_id', roomId);
-    if (delError) throw new RoomServiceError(delError.message);
-    if (rankedSpotIds.length === 0) return [];
-    const rows = rankedSpotIds.map((spotId, i) => ({
-      room_id: roomId,
-      participant_id: participantId,
-      spot_id: spotId,
-      rank: i + 1,
-    }));
-    const { error } = await supabase.from('votes').insert(rows).select('id');
-    if (error) throw new RoomServiceError(error.message);
-    // Refetch after save so the caller sees exactly what is stored.
-    const { data, error: refetchError } = await supabase
-      .from('votes')
-      .select('*')
-      .eq('room_id', roomId)
-      .eq('participant_id', participantId)
-      .order('rank', { ascending: true });
-    if (refetchError) throw new RoomServiceError(refetchError.message);
-    return ((data ?? []) as VoteRow[]).map(mapVote);
+    // One active ranking, replaced ATOMICALLY via the SECURITY DEFINER
+    // replace_votes() RPC (migration 0006): a single transaction that
+    // deletes the previous ranking and inserts the new one, with the
+    // room-status / room-match guards enforced server-side. The old
+    // delete-then-insert client flow could strand a participant with
+    // no ranking (insert failure) or interleave concurrent saves.
+    // Empty rankings are rejected by validation above: clearing a
+    // ranking is not a supported operation (see voting.ts).
+    const { data: rpcRows, error: rpcError } = await supabase.rpc('replace_votes', {
+      p_room_id: roomId,
+      p_participant_id: participantId,
+      p_spot_ids: rankedSpotIds,
+    });
+    if (rpcError) {
+      const code = inferCoordinationCode(rpcError.message);
+      // The RPC raises user-facing messages for guard failures; anything
+      // else (e.g. the function missing pre-migration) gets a generic
+      // message instead of leaking a database error to the UI.
+      if (code === 'UNKNOWN') {
+        throw new CoordinationError('VOTE_FAILED', 'Failed to save your ranking. Try again.');
+      }
+      throw new CoordinationError(code, rpcError.message);
+    }
+    const saved = ((rpcRows ?? []) as VoteRow[]).map(mapVote);
+    // Refetch after save so the caller sees exactly what is stored. A
+    // refetch failure is NON-FATAL: the save already succeeded, so the
+    // RPC's returned rows stand in.
+    try {
+      const { data, error: refetchError } = await supabase
+        .from('votes')
+        .select('*')
+        .eq('room_id', roomId)
+        .eq('participant_id', participantId)
+        .order('rank', { ascending: true });
+      if (refetchError) return saved;
+      return ((data ?? []) as VoteRow[]).map(mapVote);
+    } catch {
+      return saved;
+    }
   }
 
   async getVotes(roomId: string): Promise<Vote[]> {

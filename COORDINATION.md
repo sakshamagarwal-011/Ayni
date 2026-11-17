@@ -102,14 +102,24 @@ Typed errors (`src/coordination/errors.ts`): `CoordinationError` with a user-saf
 
 | Code | Meaning | Typical source |
 |---|---|---|
-| `NOT_MEMBER` | Caller is not a participant (or not acting as themselves) | 401, vote/arrival/finalize guards |
+| `NOT_MEMBER` | Caller is not a participant (or not acting as themselves) | vote/arrival/finalize guards |
+| `UNAUTHORIZED` | No/invalid auth (HTTP 401) | Edge Function auth guards |
 | `NOT_HOST` | Caller is a member but not the host | 403, finalize guard |
+| `NOT_FINALIZED` | Action requires a finalized room (e.g. arrival) | state-machine guard |
 | `ALREADY_FINALIZED` | Room is already finalized (message names the spot) | 409, finalize/vote guards |
 | `STALE_VERSION` | `expectedDecisionVersion` mismatch / concurrent finalization | 409 |
 | `EXPIRED` | Room or link expired | 410, expiry guards |
 | `OFFLINE` | Device offline / live connection down | connectivity listeners |
 | `VOTE_FAILED` | Ranking invalid or could not be saved | validation, save failures |
-| `UNKNOWN` | Anything else (message is still user-safe) | 500, unexpected errors |
+| `UNKNOWN` | Anything else (message is still user-safe) | 500, unexpected errors, bare 403/409 |
+
+Vote saves go through the atomic `replace_votes()` RPC (migration
+0006): one transaction replaces the caller's ranking, enforcing
+ownership, open room state, and spot membership server-side. A DB
+trigger (`check_vote_validity`) plus a unique `(room_id,
+participant_id, rank)` index enforce the same guards for any direct
+vote write, so a member cannot vote in a finalized/expired room, use
+cross-room ids, or submit duplicate ranks.
 
 ## 9. Database changes (migration 0005)
 

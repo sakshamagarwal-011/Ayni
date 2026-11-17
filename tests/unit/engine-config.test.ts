@@ -66,9 +66,12 @@ describe('resolveEngineMode', () => {
 
 describe('getEngineConfig', () => {
   it('reads from import.meta.env and caches', () => {
+    // Env-independent: the developer's .env may set live providers, so
+    // assert consistency with parseEngineConfig(import.meta.env) +
+    // caching instead of hardcoded defaults (covered above).
     resetEngineConfigCache();
     const config = getEngineConfig();
-    expect(config.placesProvider).toBe('mock');
+    expect(config).toEqual(parseEngineConfig((import.meta.env ?? {}) as Record<string, string | undefined>));
     expect(getEngineConfig()).toBe(config);
     resetEngineConfigCache();
   });

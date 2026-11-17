@@ -32,9 +32,9 @@ export interface SpotTally {
 export interface VoteTally {
   /** One entry per compared spot, in the input spot order. */
   perSpot: SpotTally[];
-  /** Distinct participant ids who cast any vote. */
+  /** Distinct participant ids who cast any in-set vote. */
   voters: string[];
-  /** Total number of vote rows. */
+  /** Total number of in-set vote rows (out-of-set rows are ignored). */
   totalVotes: number;
 }
 
@@ -93,10 +93,12 @@ export function tallyVotes(votes: Vote[], spotIds: string[]): VoteTally {
   const bySpot = new Map<string, { ranks: number[]; voters: Set<string> }>();
   for (const id of spotIds) bySpot.set(id, { ranks: [], voters: new Set() });
   const voters = new Set<string>();
+  let inSetVotes = 0;
   for (const vote of votes) {
-    voters.add(vote.participantId);
     const entry = bySpot.get(vote.spotId);
     if (!entry) continue; // Vote for a spot outside the compared set: ignore for tally.
+    voters.add(vote.participantId);
+    inSetVotes += 1;
     entry.ranks.push(vote.rank);
     entry.voters.add(vote.participantId);
   }
@@ -108,7 +110,7 @@ export function tallyVotes(votes: Vote[], spotIds: string[]): VoteTally {
       entry.ranks.length > 0 ? entry.ranks.reduce((sum, r) => sum + r, 0) / entry.ranks.length : Infinity;
     return { spotId, firstChoiceCount, bordaScore, averageRank, voterCount: entry.voters.size };
   });
-  return { perSpot, voters: [...voters], totalVotes: votes.length };
+  return { perSpot, voters: [...voters], totalVotes: inSetVotes };
 }
 
 /**

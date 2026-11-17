@@ -86,6 +86,14 @@ describe('tallyVotes', () => {
     expect(tally.perSpot[0].firstChoiceCount).toBe(1);
     expect(tally.voters).toContain('p1');
   });
+  it('excludes out-of-set-only voters from voters and totalVotes', () => {
+    // p2 voted only for a spot outside the compared set: they are not
+    // a voter of this tally and their vote is not counted.
+    const tally = tallyVotes([vote('p1', 'a', 1), vote('p2', 'zzz', 1)], ['a']);
+    expect(tally.voters).toEqual(['p1']);
+    expect(tally.totalVotes).toBe(1);
+    expect(tally.perSpot[0].voterCount).toBe(1);
+  });
   it('reports Infinity average rank for unranked spots', () => {
     const tally = tallyVotes([vote('p1', 'a', 1)], ['a', 'b']);
     expect(tally.perSpot[1].averageRank).toBe(Infinity);

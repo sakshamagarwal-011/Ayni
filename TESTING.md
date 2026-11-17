@@ -11,6 +11,7 @@
 | **Phase 3 map manual tests (§5)** | **PENDING** — require a real browser (WebGL, GPS permission flows, network). Not run in this environment (no browser test harness, no credentials). Live OSRM routing and two-browser map sync are **unverified** until §5 is run and recorded. |
 | **Engine + animation live tests (§7)** | **PENDING** — require a real browser + opt-in Overpass/OSRM env vars. Demo-path search was verified in-browser on 2026-11-17 (room CN9DBA: enabled button, consented search returned 3 ranked demo places, no errors). Live place search, live optimization ranking, and in-browser animation/3D rendering are **unverified** until §7 is run and recorded. |
 | **Coordination live tests (§8)** | **PENDING** — require a real Supabase project (migration 0005 + redeployed Edge Functions) and two independent browser sessions. Partly exercised by the §4 run on 2026-11-17 (voting + tally, host finalize, finalized announcement, own-row-only navigation links — all verified live). Still unverified: arrival confirmation, reconnect/offline behaviour, expiry, and stale-optimization guards. |
+| **Audit-fix pass (2026-11-17)** | **CODE COMPLETE, LIVE VERIFICATION PENDING** — 18 majors + 58 minors from the 2026-11-17 audit implemented (minor #21 antimeridian intentionally skipped: no India impact); India-first additions: scooter travel mode (replaces bicycle; OSRM driving profile), city presets (Delhi/Mumbai/Pune/Hyderabad/Chennai), 5 new place categories. Migrations `0006_audit_hardening` + `0007_scooter_mode` and redeployed Edge Functions are **not yet applied/deployed** — apply via Dashboard SQL Editor + redeploy, then re-run §§4–5, 7–8 live before claiming verification. Unit (285) + integration (31) tests pass locally; build passes. |
 
 ## 1. Unit tests (no Supabase needed)
 
@@ -30,7 +31,7 @@ npm run dev
 - [ ] Landing loads; header shows “Demo mode — Supabase not configured”.
 - [ ] Create: empty title / short name / missing location show inline errors; valid form creates a room and lands in the Lobby with a 6-char code.
 - [ ] Lobby: invite code + copy-link work; participants listed; ready toggle flips; “Discover routes” navigates onward.
-- [ ] Routes: mode tabs (Walk/Bike/Car/Transit) change estimates; fairest spot is ranked #1; back/forward navigation works.
+- [ ] Routes: mode tabs (Walk/Scooter/Car/Transit) change estimates; fairest spot is ranked #1; back/forward navigation works.
 - [ ] Compare: up/down reordering works; “Save my ranking” confirms; finalize navigates to Navigate.
 - [ ] Navigate: final spot shown with per-friend distance/ETA; external-maps links are present and labelled external; copy-link works.
 - [ ] Unknown room: opening `/room/ZZZZZZ/lobby` shows an error state with a link to `/join`.

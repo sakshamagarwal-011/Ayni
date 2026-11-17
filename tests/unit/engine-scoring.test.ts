@@ -26,7 +26,11 @@ describe('scoring helpers', () => {
 describe('scoreCandidate', () => {
   it('minTotal is the sum', () => {
     expect(scoreCandidate([10, 20, 30], 'minTotal')).toBe(60);
-    expect(scoreCandidate([], 'minTotal')).toBe(0);
+  });
+
+  it('throws on empty durations and unknown preferences', () => {
+    expect(() => scoreCandidate([], 'minTotal')).toThrow(RangeError);
+    expect(() => scoreCandidate([10], 'cheapest' as never)).toThrow(RangeError);
   });
 
   it('minimax is the longest trip', () => {

@@ -99,8 +99,10 @@ describe('isOptimizationStale', () => {
     expect(check.stale).toBe(true);
     expect(check.reason).toMatch(/expired/);
   });
-  it('does not treat a null decision version as a version change', () => {
+  it('treats a null decision version as stale (the version check cannot run)', () => {
     const participants = [participant('p1')];
-    expect(isOptimizationStale(resultFor(participants, null), room({ decisionVersion: 5 }), participants, NOW).stale).toBe(false);
+    const check = isOptimizationStale(resultFor(participants, null), room({ decisionVersion: 5 }), participants, NOW);
+    expect(check.stale).toBe(true);
+    expect(check.reason).toMatch(/decision version/);
   });
 });

@@ -325,6 +325,18 @@ export function MeetingMap({
   const ensureBuildings = () => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
+    // VITE_MAP_3D_ENABLED=false is a master switch, not just the initial
+    // toggle state: never add the layer when it is off.
+    if (!config.map3dEnabled) {
+      if (map.getLayer(BUILDINGS_LAYER_ID)) {
+        try {
+          map.setLayoutProperty(BUILDINGS_LAYER_ID, 'visibility', 'none');
+        } catch {
+          /* ignore */
+        }
+      }
+      return;
+    }
     if (!buildingsOnRef.current) {
       if (map.getLayer(BUILDINGS_LAYER_ID)) {
         try {
@@ -364,10 +376,13 @@ export function MeetingMap({
     if (!map) return;
     const source = map.getSource(ROUTE_SOURCE_ID) as { setData?: (data: unknown) => void } | undefined;
     if (!source?.setData) return;
-    // Animated routes take precedence: when a map instance has them, the
-    // legacy dash layer stays empty so routes are never drawn twice.
+    // Animated routes take precedence for their participants, but
+    // routes beyond the animation cap (MAX_ANIMATED_ROUTES) still draw
+    // in the legacy layer — otherwise participants 5+ get no line at
+    // all while their legend/ETA entries still show.
     const { routes: lines } = propsRef.current;
-    const visible = animRef.current.routes.length > 0 ? [] : lines;
+    const animatedIds = new Set(animRef.current.routes.map((r) => r.participantId));
+    const visible = lines.filter((l) => !animatedIds.has(l.participantId));
     source.setData({
       type: 'FeatureCollection',
       features: visible
@@ -477,11 +492,13 @@ export function MeetingMap({
     for (const s of ss) pts.push(s.location);
     if (pin) pts.push(pin);
     const bounds = boundsForPoints(pts);
+    // Reduced motion: never animate the camera.
+    const duration = animate && !reducedMotionRef.current ? 900 : 0;
     if (!bounds) {
-      map.easeTo({ center: [BENGALURU_CENTER.lng, BENGALURU_CENTER.lat], zoom: 12, duration: animate ? 800 : 0 });
+      map.easeTo({ center: [BENGALURU_CENTER.lng, BENGALURU_CENTER.lat], zoom: 12, duration: animate && !reducedMotionRef.current ? 800 : 0 });
       return;
     }
-    map.fitBounds(bounds, { padding: { top: 48, bottom: 48, left: 40, right: 40 }, maxZoom: 15, duration: animate ? 900 : 0 });
+    map.fitBounds(bounds, { padding: { top: 48, bottom: 48, left: 40, right: 40 }, maxZoom: 15, duration });
   };
 
   /* ---------- markers ---------- */
@@ -614,6 +631,9 @@ export function MeetingMap({
     fallbackTriedRef.current = false;
     markersRef.current.clear();
     pinMarkerRef.current = null;
+    // Settles once the map loads or fails terminally; the load timeout
+    // below only fires while the map is still genuinely pending.
+    let settled = false;
 
     let map: Map;
     try {
@@ -627,8 +647,10 @@ export function MeetingMap({
         maxZoom: 19,
       });
     } catch (err) {
+      settled = true;
       setErrorMessage(err instanceof Error ? err.message : 'Map failed to start.');
       setMapStatus('error');
+      supportCallbackRef.current?.(false, 'The map failed to start.');
       return;
     }
     mapRef.current = map;
@@ -642,6 +664,7 @@ export function MeetingMap({
         return;
       }
       loadedRef.current = true;
+      settled = true;
       setMapStatus('ready');
       setErrorMessage(null);
       ensureCustomLayers();
@@ -656,21 +679,29 @@ export function MeetingMap({
     const onStyleData = () => {
       if (map.isStyleLoaded()) onStyleReady();
     };
-    const onError = (e: { error?: Error }) => {
+    const onError = (e: { error?: Error; sourceId?: string; tile?: unknown }) => {
       if (loadedRef.current) return; // Ignore later tile errors once loaded.
+      // Only STYLE-load failures abandon the vector style. A single
+      // failed tile/glyph/source error before load must not trigger
+      // the raster fallback (or the error overlay on the second one).
+      if (e.sourceId !== undefined || e.tile !== undefined) return;
       if (!fallbackTriedRef.current) {
         fallbackTriedRef.current = true;
         setUsingRasterFallback(true);
         try {
           map.setStyle(buildRasterFallbackStyle(config.rasterFallbackUrl));
         } catch (err) {
+          settled = true;
           setErrorMessage(err instanceof Error ? err.message : 'Map style failed to load.');
           setMapStatus('error');
+          supportCallbackRef.current?.(false, 'The map style failed to load.');
         }
         return;
       }
+      settled = true;
       setErrorMessage(e.error?.message ?? 'Map failed to load.');
       setMapStatus('error');
+      supportCallbackRef.current?.(false, 'The map failed to load.');
     };
     const onClick = (e: MapMouseEvent) => {
       propsRef.current.onMapClick?.({ lat: e.lngLat.lat, lng: e.lngLat.lng });
@@ -686,6 +717,16 @@ export function MeetingMap({
     map.on('touchstart', onUserGrab);
     map.on('wheel', onUserGrab);
 
+    // Load timeout: a hanging style request must not leave "Loading
+    // map…" on screen forever with no retry path.
+    const loadTimeout = setTimeout(() => {
+      if (settled || loadedRef.current) return;
+      settled = true;
+      setErrorMessage('The map took too long to load. Check your connection and try again.');
+      setMapStatus('error');
+      supportCallbackRef.current?.(false, 'The map failed to load.');
+    }, 20_000);
+
     const resizeObserver =
       typeof ResizeObserver !== 'undefined'
         ? new ResizeObserver(() => {
@@ -699,6 +740,7 @@ export function MeetingMap({
     resizeObserver?.observe(container);
 
     return () => {
+      clearTimeout(loadTimeout);
       resizeObserver?.disconnect();
       map.remove();
       mapRef.current = null;
@@ -733,6 +775,9 @@ export function MeetingMap({
     syncAnimatedData();
     syncAnimationLabels();
     syncPulseMarker();
+    // Removing animated routes must restore the legacy layer (it draws
+    // the routes the animation cap leaves out — see syncRouteData).
+    syncRouteData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animRoutes, animationProgress, visibleKey, destinationPulse, pulseDestination, mapStatus]);
 
@@ -780,6 +825,20 @@ export function MeetingMap({
 
   /* ---------- immersive 3D: capability-checked pitch + buildings, 2D fallback with a note ---------- */
 
+  // Camera + buildings state captured when immersive mode is applied,
+  // so turning it off (or losing support while on) restores the view
+  // instead of leaving the map pitched with buildings forced on.
+  const immersivePrevRef = useRef<{ pitch: number; bearing: number; buildingsOn: boolean } | null>(null);
+  const immersiveAppliedRef = useRef(false);
+
+  // Report unsupported immediately when WebGL is unavailable, so the
+  // parent's 3D toggle never sits on "Checking…" forever.
+  useEffect(() => {
+    if (mapStatus === 'unsupported') {
+      supportCallbackRef.current?.(false, 'WebGL is not available on this device.');
+    }
+  }, [mapStatus]);
+
   useEffect(() => {
     if (mapStatus !== 'ready') return;
     const support = canUseImmersive3D({
@@ -789,18 +848,46 @@ export function MeetingMap({
       map3dEnabled: config.map3dEnabled,
     });
     supportCallbackRef.current?.(support.supported, support.reason);
+    const restoreCamera = () => {
+      if (!immersiveAppliedRef.current) return;
+      immersiveAppliedRef.current = false;
+      const prev = immersivePrevRef.current;
+      immersivePrevRef.current = null;
+      const pitch = prev?.pitch ?? initialPitch;
+      const bearing = prev?.bearing ?? 0;
+      const map = mapRef.current;
+      if (map) {
+        if (reducedMotionRef.current) {
+          map.jumpTo({ pitch, bearing });
+        } else {
+          map.easeTo({ pitch, bearing, duration: 900 });
+        }
+      }
+      setPitch(pitch);
+      if (prev) setBuildingsOn(prev.buildingsOn);
+    };
     if (!immersive3D) {
+      restoreCamera();
       setImmersiveNote(null);
       return;
     }
     if (!support.supported) {
+      restoreCamera();
       setImmersiveNote(`${support.reason} Showing the 2D map.`);
       return;
     }
     setImmersiveNote(null);
-    if (!buildingsOn) setBuildingsOn(true);
     const map = mapRef.current;
     if (!map) return;
+    if (!immersiveAppliedRef.current) {
+      immersivePrevRef.current = {
+        pitch: map.getPitch(),
+        bearing: map.getBearing(),
+        buildingsOn: buildingsOnRef.current,
+      };
+      immersiveAppliedRef.current = true;
+    }
+    if (!buildingsOn) setBuildingsOn(true);
     if (reducedMotionRef.current) {
       map.jumpTo({ pitch: 60, bearing: 15 });
     } else {
@@ -823,16 +910,19 @@ export function MeetingMap({
 
   useEffect(() => {
     if (!flyToSpot || selectedSpotId === lastSelectedRef.current) return;
-    lastSelectedRef.current = selectedSpotId;
     const map = mapRef.current;
     const spot = spots.find((s) => s.id === selectedSpotId);
     if (!map || mapStatus !== 'ready' || !spot) return;
-    map.flyTo({
-      center: [spot.location.lng, spot.location.lat],
-      zoom: Math.max(map.getZoom(), 14.5),
-      duration: 1400,
-      essential: true,
-    });
+    // Record the selection only after a successful fly-to: if the spot
+    // changed before the map was ready, the pending fly-to must not be
+    // silently skipped on the next run.
+    lastSelectedRef.current = selectedSpotId;
+    const target = { center: [spot.location.lng, spot.location.lat] as [number, number], zoom: Math.max(map.getZoom(), 14.5) };
+    if (reducedMotionRef.current) {
+      map.jumpTo(target);
+    } else {
+      map.flyTo({ ...target, duration: 1400, essential: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSpotId, flyToSpot, mapStatus]);
 
@@ -853,11 +943,17 @@ export function MeetingMap({
 
   const setPitchDegrees = (degrees: number) => {
     setPitch(degrees);
-    mapRef.current?.easeTo({ pitch: degrees, duration: 600 });
+    const map = mapRef.current;
+    if (!map) return;
+    if (reducedMotionRef.current) map.jumpTo({ pitch: degrees });
+    else map.easeTo({ pitch: degrees, duration: 600 });
   };
 
   const resetBearing = () => {
-    mapRef.current?.easeTo({ bearing: 0, duration: 600 });
+    const map = mapRef.current;
+    if (!map) return;
+    if (reducedMotionRef.current) map.jumpTo({ bearing: 0 });
+    else map.easeTo({ bearing: 0, duration: 600 });
   };
 
   const retry = () => {
@@ -955,11 +1051,13 @@ export function MeetingMap({
           <button
             type="button"
             onClick={() => setBuildingsOn((v) => !v)}
-            disabled={buildingsAvailable === 'no'}
+            disabled={buildingsAvailable === 'no' || !config.map3dEnabled}
             title={
-              buildingsAvailable === 'no'
-                ? '3D buildings are not available for this map style'
-                : 'Toggle 3D building extrusion (where map data supports it)'
+              !config.map3dEnabled
+                ? '3D buildings are disabled in settings'
+                : buildingsAvailable === 'no'
+                  ? '3D buildings are not available for this map style'
+                  : 'Toggle 3D building extrusion (where map data supports it)'
             }
             aria-pressed={buildingsOn}
             className="rounded-lg bg-navy-900/90 px-2 py-1.5 text-left text-xs font-medium text-slate-200 shadow-lg hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-50"

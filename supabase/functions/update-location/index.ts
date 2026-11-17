@@ -3,7 +3,7 @@
 // Expiry is set to now + 2h here and re-enforced by the DB trigger.
 import { getServiceClient, getUserIdFromRequest, readJsonBody } from '../_shared/auth.ts';
 import { handleOptions, jsonError, jsonResponse } from '../_shared/cors.ts';
-import { isUuid, validateLatLng } from '../_shared/validation.ts';
+import { isUuid, validateAccuracyM, validateLatLng } from '../_shared/validation.ts';
 
 Deno.serve(async (req: Request) => {
   const options = handleOptions(req);
@@ -14,11 +14,13 @@ Deno.serve(async (req: Request) => {
     const userId = await getUserIdFromRequest(req);
     if (!userId) return jsonError('Unauthorized.', 401);
 
-    const body = await readJsonBody<{ roomId?: unknown; lat?: unknown; lng?: unknown; label?: unknown }>(req);
+    const body = await readJsonBody<{ roomId?: unknown; lat?: unknown; lng?: unknown; label?: unknown; accuracyM?: unknown }>(req);
     if (!body) return jsonError('Invalid JSON body.', 400);
     if (!isUuid(body.roomId)) return jsonError('Invalid room id.', 400);
     const locError = validateLatLng(body.lat, body.lng);
     if (locError) return jsonError(locError, 400);
+    const acc = validateAccuracyM(body.accuracyM);
+    if (acc.error) return jsonError(acc.error, 400);
     const label = typeof body.label === 'string' && body.label.trim() ? body.label.trim().slice(0, 60) : 'Starting point';
 
     const service = getServiceClient();
@@ -59,7 +61,7 @@ Deno.serve(async (req: Request) => {
           lat: body.lat,
           lng: body.lng,
           label,
-          accuracy_m: 20,
+          accuracy_m: acc.accuracyM,
           updated_at: now.toISOString(),
           expires_at: new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString(),
         },

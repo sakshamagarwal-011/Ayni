@@ -103,7 +103,20 @@ describe('polylineLengthM / midpointOf', () => {
   it('measures length and midpoint', () => {
     expect(polylineLengthM(LINE)).toBeCloseTo(3336, 0);
     expect(polylineLengthM([])).toBe(0);
-    expect(midpointOf(LINE)).toEqual([0.02, 0]);
+    // Arc-length midpoint: half of 3 equal segments lands at 0.015°,
+    // not on the vertex-index midpoint (0.02°).
+    expect(midpointOf(LINE)).toEqual([0.015, 0]);
     expect(midpointOf([])).toBeNull();
+  });
+
+  it('coerces non-finite progress to 0', () => {
+    expect(progressGeometry(LINE, Number.NaN)).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
+    expect(progressGeometry(LINE, Number.POSITIVE_INFINITY)).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
   });
 });

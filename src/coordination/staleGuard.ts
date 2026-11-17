@@ -39,7 +39,15 @@ export function isOptimizationStale(
   if (room.status === 'expired' || isRoomExpired(room, now)) {
     return { stale: true, reason: 'This meeting has expired since this search ran.' };
   }
-  if (result.decisionVersion !== null && result.decisionVersion !== room.decisionVersion) {
+  if (result.decisionVersion === null) {
+    // No version stamp: the result cannot be proven current, so it
+    // must not be treated as fresh. Callers always stamp a version.
+    return {
+      stale: true,
+      reason: 'This search has no decision version stamp, so it cannot be verified as current. Re-run the search.',
+    };
+  }
+  if (result.decisionVersion !== room.decisionVersion) {
     return {
       stale: true,
       reason: 'The room changed since this search ran (a newer decision exists).',

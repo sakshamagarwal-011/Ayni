@@ -1,9 +1,25 @@
-import { motion } from 'framer-motion';
+import { useEffect } from 'react';
+import { motion, useAnimationControls } from 'framer-motion';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Navbar } from './Navbar';
 
 export function Layout() {
   const location = useLocation();
+  const controls = useAnimationControls();
+
+  // Replay the page-enter animation on navigation WITHOUT remounting
+  // the page: the previous key={location.pathname} remounted the whole
+  // page tree on every navigation, losing unsaved ranking drafts and
+  // resetting mode/spot selection. The animation itself is identical
+  // (0.25s easeOut fade + slide from y:10).
+  useEffect(() => {
+    void controls.start({
+      opacity: [0, 1],
+      y: [10, 0],
+      transition: { duration: 0.25, ease: 'easeOut' },
+    });
+  }, [location.pathname, controls]);
+
   return (
     <div className="flex min-h-dvh flex-col bg-navy-950 text-slate-100">
       <div className="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
@@ -12,10 +28,8 @@ export function Layout() {
       </div>
       <Navbar />
       <motion.main
-        key={location.pathname}
         initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25, ease: 'easeOut' }}
+        animate={controls}
         className="relative mx-auto w-full max-w-5xl flex-1 px-4 pb-16 pt-6 sm:px-6 sm:pt-8"
         style={{ paddingBottom: 'max(4rem, env(safe-area-inset-bottom))' }}
       >

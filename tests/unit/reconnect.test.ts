@@ -162,6 +162,37 @@ describe('createResilientSubscription', () => {
     sub.unsubscribe();
   });
 
+  it('pauses retries while offline without consuming the attempt budget', () => {
+    const handlers: ChannelHandlers[] = [];
+    const statuses: SubscriptionStatus[] = [];
+    const scheduler = manualScheduler();
+    let online = true;
+    const sub = createResilientSubscription({
+      createChannel: (h) => {
+        handlers.push(h);
+        return { unsubscribe: () => undefined };
+      },
+      onChange: () => undefined,
+      onStatus: (s) => statuses.push(s),
+      schedule: scheduler.schedule,
+      isOnline: () => online,
+    });
+    handlers[0].onStatus('SUBSCRIBED');
+    online = false;
+    handlers[0].onStatus('CHANNEL_ERROR');
+    expect(statuses[statuses.length - 1]).toBe('offline');
+    expect(handlers).toHaveLength(1);
+    expect(scheduler.pending).toHaveLength(0); // nothing scheduled while offline
+    online = true;
+    sub.reconnectNow();
+    expect(handlers).toHaveLength(2);
+    handlers[1].onStatus('SUBSCRIBED');
+    // The offline pause consumed no attempts: the next failure uses the first backoff delay.
+    handlers[1].onStatus('CHANNEL_ERROR');
+    expect(scheduler.pending[scheduler.pending.length - 1].ms).toBe(1000);
+    sub.unsubscribe();
+  });
+
   it('reconnectNow is a no-op while connected', () => {
     const { handlers, sub } = harness();
     lastHandler(handlers).onStatus('SUBSCRIBED');

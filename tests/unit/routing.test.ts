@@ -43,10 +43,10 @@ function stubFetch(payload: unknown, opts: { ok?: boolean; status?: number } = {
 }
 
 describe('profileForMode', () => {
-  it('maps car/walk/bike to OSRM profiles', () => {
+  it('maps car/walk/scooter to OSRM profiles (scooter shares driving: no motorcycle profile)', () => {
     expect(profileForMode('car')).toEqual({ profile: 'driving', transitApproximation: false });
     expect(profileForMode('walk')).toEqual({ profile: 'foot', transitApproximation: false });
-    expect(profileForMode('bike')).toEqual({ profile: 'bike', transitApproximation: false });
+    expect(profileForMode('scooter')).toEqual({ profile: 'driving', transitApproximation: false });
   });
 
   it('maps transit to driving and flags the approximation', () => {
@@ -216,6 +216,72 @@ describe('OSRM client (mocked fetch — no real network)', () => {
     expect((await client.fetchRoute(FROM, TO, 'car')).source).toBe('estimated');
     fail = false;
     expect((await client.fetchRoute(FROM, TO, 'car')).source).toBe('osrm');
+  });
+
+  it('re-derives the transit approximation flag on cache hits', async () => {
+    // Car and transit share the driving profile + cache key: a cached
+    // car result must still be labelled a transit approximation when
+    // served to a transit request (and vice versa).
+    const { fetchFn, calls } = stubFetch(OSRM_OK);
+    const client = createOsrmClient({ ...baseOptions, fetchFn });
+    const car = await client.fetchRoute(FROM, TO, 'car');
+    const transit = await client.fetchRoute(FROM, TO, 'transit');
+    expect(calls()).toBe(1);
+    expect(car.transitApproximation).toBe(false);
+    expect(transit.transitApproximation).toBe(true);
+    expect(transit.source).toBe('osrm');
+  });
+
+  it('opens the circuit after 3 consecutive failures and fails fast', async () => {
+    const { fetchFn, calls } = stubFetch({}, { ok: false, status: 500 });
+    const client = createOsrmClient({ ...baseOptions, fetchFn });
+    for (let i = 0; i < 3; i += 1) {
+      expect((await client.fetchRoute(FROM, TO, 'car')).source).toBe('estimated');
+    }
+    expect(calls()).toBe(3);
+    // Breaker open: fallback without a network request.
+    expect((await client.fetchRoute(FROM, TO, 'car')).source).toBe('estimated');
+    expect(calls()).toBe(3);
+  });
+
+  it('allows a probe request after the breaker cooldown, and clearCache resets the breaker', async () => {
+    let nowMs = 1_000_000;
+    let fail = true;
+    const fetchFn: FetchLike = async () => {
+      if (fail) return { ok: false, status: 500, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => OSRM_OK };
+    };
+    const client = createOsrmClient({
+      ...baseOptions,
+      fetchFn,
+      now: () => nowMs,
+      circuitBreakerThreshold: 2,
+      circuitBreakerCooldownMs: 30_000,
+    });
+    await client.fetchRoute(FROM, TO, 'car');
+    await client.fetchRoute(FROM, TO, 'car');
+    // Breaker open.
+    expect((await client.fetchRoute(FROM, TO, 'car')).source).toBe('estimated');
+    // clearCache resets the breaker: the next call probes the server.
+    fail = false;
+    client.clearCache();
+    expect((await client.fetchRoute(FROM, TO, 'car')).source).toBe('osrm');
+    // Open it again, then let the cooldown elapse for a probe.
+    // (Clear the cache first: the successful probe cached the route.)
+    client.clearCache();
+    fail = true;
+    await client.fetchRoute(FROM, TO, 'car');
+    await client.fetchRoute(FROM, TO, 'car');
+    nowMs += 30_001;
+    fail = false;
+    expect((await client.fetchRoute(FROM, TO, 'car')).source).toBe('osrm');
+  });
+
+  it('disables the breaker when the threshold is 0', async () => {
+    const { fetchFn, calls } = stubFetch({}, { ok: false, status: 500 });
+    const client = createOsrmClient({ ...baseOptions, fetchFn, circuitBreakerThreshold: 0 });
+    for (let i = 0; i < 5; i += 1) await client.fetchRoute(FROM, TO, 'car');
+    expect(calls()).toBe(5);
   });
 
   it('fetchRoutes preserves order and falls back per-request', async () => {

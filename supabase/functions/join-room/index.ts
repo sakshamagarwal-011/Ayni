@@ -63,7 +63,13 @@ Deno.serve(async (req: Request) => {
     if (existing) {
       const { data: updated } = await service
         .from('participants')
-        .update({ last_seen_at: new Date().toISOString() })
+        .update({
+          // Rejoin with a changed display name updates the name too —
+          // previously only last_seen_at was refreshed, so renames
+          // were silently ignored.
+          display_name: (body.displayName as string).trim(),
+          last_seen_at: new Date().toISOString(),
+        })
         .eq('id', (existing as { id: string }).id)
         .select('*')
         .single();

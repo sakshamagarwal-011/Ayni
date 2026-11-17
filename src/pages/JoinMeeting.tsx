@@ -3,20 +3,19 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { LocationPicker, type LocationValue } from '../components/LocationPicker';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { Spinner } from '../components/LoadingSkeleton';
-import { STARTING_AREAS } from '../data/mockData';
-import { getDisplayNameDraft } from '../services/mockService';
+import { getDisplayNameDraft, getLastCodeHint } from '../services/mockService';
 import { getRoomService } from '../services';
 import { normalizeInviteCode, validateDisplayName, validateInviteCode, validateLocation } from '../lib/validation';
 
 export function JoinMeeting() {
   const { code: codeParam } = useParams<{ code: string }>();
   const navigate = useNavigate();
-  const [code, setCode] = useState(codeParam ?? '');
+  // Prefill from the last-used invite code when no :code param is present.
+  const [code, setCode] = useState(() => codeParam ?? getLastCodeHint() ?? '');
   const [displayName, setDisplayName] = useState(() => getDisplayNameDraft());
-  const [location, setLocation] = useState<LocationValue>({
-    location: STARTING_AREAS[1].location,
-    label: STARTING_AREAS[1].area,
-  });
+  // No location is pre-selected: the user must explicitly pick one.
+  const [location, setLocation] = useState<LocationValue | null>(null);
+  const [locationTextValid, setLocationTextValid] = useState(true);
   const [errors, setErrors] = useState<{ code?: string; name?: string; location?: string }>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -32,10 +31,15 @@ export function JoinMeeting() {
     const next = {
       code: validateInviteCode(code) ?? undefined,
       name: validateDisplayName(displayName) ?? undefined,
-      location: validateLocation(location.location.lat, location.location.lng, location.label) ?? undefined,
+      location:
+        !location
+          ? 'Please choose your starting location.'
+          : !locationTextValid
+            ? 'Enter valid coordinates for your starting location.'
+            : (validateLocation(location.location.lat, location.location.lng, location.label) ?? undefined),
     };
     setErrors(next);
-    if (next.code || next.name || next.location) return;
+    if (next.code || next.name || next.location || !location) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -44,6 +48,7 @@ export function JoinMeeting() {
         displayName: displayName.trim(),
         location: location.location,
         locationLabel: location.label,
+        accuracyM: location.accuracyM ?? null,
       });
       navigate(`/room/${detail.room.inviteCode}/lobby`);
     } catch (err) {
@@ -74,7 +79,10 @@ export function JoinMeeting() {
             id="code"
             className="input-field font-mono uppercase tracking-widest"
             value={code}
-            onChange={(e) => setCode(e.target.value.toUpperCase())}
+            onChange={(e) => {
+              setCode(e.target.value.toUpperCase());
+              if (touched) setErrors((prev) => ({ ...prev, code: undefined }));
+            }}
             placeholder="e.g. K7M2QX"
             maxLength={8}
             aria-invalid={Boolean(touched && errors.code)}
@@ -99,7 +107,10 @@ export function JoinMeeting() {
             id="joinName"
             className="input-field"
             value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
+            onChange={(e) => {
+              setDisplayName(e.target.value);
+              if (touched) setErrors((prev) => ({ ...prev, name: undefined }));
+            }}
             placeholder="e.g. Alex"
             maxLength={30}
             aria-invalid={Boolean(touched && errors.name)}
@@ -113,7 +124,15 @@ export function JoinMeeting() {
           )}
         </div>
 
-        <LocationPicker value={location} onChange={setLocation} error={touched ? errors.location : null} />
+        <LocationPicker
+          value={location}
+          onChange={(v) => {
+            setLocation(v);
+            if (touched) setErrors((prev) => ({ ...prev, location: undefined }));
+          }}
+          error={touched ? errors.location : null}
+          onValidityChange={setLocationTextValid}
+        />
 
         <button type="submit" className="btn-primary w-full" disabled={submitting}>
           {submitting ? <Spinner label="Joining" /> : 'Join meeting'}

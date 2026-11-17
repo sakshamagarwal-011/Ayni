@@ -187,6 +187,7 @@ describe('isActionAllowed', () => {
   it('arrive: finalized only, members only', () => {
     expect(isActionAllowed('finalized', 'arrive', { isMember: true }).allowed).toBe(true);
     expect(isActionAllowed('lobby', 'arrive', { isMember: true }).allowed).toBe(false);
+    expect(isActionAllowed('lobby', 'arrive', { isMember: true }).code).toBe('NOT_FINALIZED');
     expect(isActionAllowed('finalized', 'arrive', {}).code).toBe('NOT_MEMBER');
   });
 });

@@ -14,8 +14,21 @@ import { ErrorBanner } from './ErrorBanner';
 export function FinalizedBanner({ room, spots }: { room: MeetingRoom; spots: MeetingSpot[] }) {
   if (room.status !== 'finalized') return null;
   const spot = spots.find((s) => s.id === room.finalizedSpotId);
-  if (!spot) return null;
   const when = room.finalizedAt ? new Date(room.finalizedAt).toLocaleString() : null;
+  if (!spot) {
+    // Finalized but the spot row is missing (deleted data): still name
+    // the finalized state instead of showing no banner anywhere.
+    return (
+      <div role="status" className="glass-card border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
+        <p className="font-semibold text-white">
+          Meeting point locked in{when ? ` (finalized at ${when})` : ''}, but the spot details are unavailable.
+        </p>
+        <p className="mt-1 text-emerald-100/90">
+          This meeting was finalized by the host. Reload to check for the destination details.
+        </p>
+      </div>
+    );
+  }
   return (
     <div role="status" className="glass-card border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-100">
       <p className="font-semibold text-white">

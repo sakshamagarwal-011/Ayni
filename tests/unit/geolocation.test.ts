@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { GEOLOCATION_OPTIONS, geolocationErrorMessage } from '../../src/map/useGeolocation';
+import {
+  GEOLOCATION_OPTIONS,
+  assessGeolocationFix,
+  geolocationErrorMessage,
+} from '../../src/map/useGeolocation';
 
 describe('geolocation error messages', () => {
   it('explains permission denial with a fallback', () => {
@@ -27,5 +31,30 @@ describe('geolocation options', () => {
     expect(GEOLOCATION_OPTIONS.enableHighAccuracy).toBe(true);
     expect(GEOLOCATION_OPTIONS.timeout).toBe(10_000);
     expect(GEOLOCATION_OPTIONS.maximumAge).toBe(30_000);
+  });
+});
+
+describe('assessGeolocationFix', () => {
+  const NOW = 1_700_000_000_000;
+  const base = { coords: { lat: 12.97, lng: 77.64 }, accuracyM: 15, timestamp: NOW };
+  it('accepts a fresh, accurate fix without a warning', () => {
+    const quality = assessGeolocationFix(base, NOW);
+    expect(quality.degraded).toBe(false);
+    expect(quality.warning).toBeNull();
+  });
+  it('warns on low accuracy (>100 m)', () => {
+    const quality = assessGeolocationFix({ ...base, accuracyM: 1500 }, NOW);
+    expect(quality.degraded).toBe(true);
+    expect(quality.lowAccuracy).toBe(true);
+    expect(quality.warning).toMatch(/1500 m/);
+  });
+  it('warns on a stale fix (>60 s old)', () => {
+    const quality = assessGeolocationFix({ ...base, timestamp: NOW - 61_000 }, NOW);
+    expect(quality.degraded).toBe(true);
+    expect(quality.staleFix).toBe(true);
+    expect(quality.warning).toMatch(/over a minute old/);
+  });
+  it('treats unknown accuracy as usable', () => {
+    expect(assessGeolocationFix({ ...base, accuracyM: null }, NOW).degraded).toBe(false);
   });
 });

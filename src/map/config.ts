@@ -104,21 +104,62 @@ function asClampedInt(raw: string | undefined, fallback: number, min: number, ma
 }
 
 export function parseMapConfig(env: Record<string, string | undefined>): MapConfig {
+  const osrmBaseUrl = asHttpUrl(env.VITE_OSRM_BASE_URL, DEFAULT_MAP_CONFIG.osrmBaseUrl).replace(/\/+$/, '');
+  // Floor the request gap at 1000ms against the public demo server: a
+  // typo must never disable throttling there. Operators pointing at
+  // their OWN server may set a lower gap deliberately.
+  const minIntervalFloor = osrmBaseUrl === DEFAULT_OSRM_BASE_URL ? 1000 : 0;
   return {
     styleUrl: asHttpUrl(env.VITE_MAP_STYLE_URL, DEFAULT_MAP_CONFIG.styleUrl),
     rasterFallbackUrl: asHttpUrl(env.VITE_MAP_RASTER_FALLBACK_URL, DEFAULT_MAP_CONFIG.rasterFallbackUrl),
-    osrmBaseUrl: asHttpUrl(env.VITE_OSRM_BASE_URL, DEFAULT_MAP_CONFIG.osrmBaseUrl).replace(/\/+$/, ''),
+    osrmBaseUrl,
     routingProvider: asProvider(env.VITE_ROUTING_PROVIDER),
     routingEnabled: asBool(env.VITE_ROUTING_ENABLED, DEFAULT_MAP_CONFIG.routingEnabled),
     map3dEnabled: asBool(env.VITE_MAP_3D_ENABLED, DEFAULT_MAP_CONFIG.map3dEnabled),
-    // Never allow a sub-second gap against the public demo server via a
-    // typo: the floor is 1000ms unless the operator deliberately sets a
-    // lower value for their OWN server (documented in MAPS.md). The
-    // parser clamps to [0, 10000]; the default stays 1100ms.
-    osrmMinIntervalMs: asClampedInt(env.VITE_OSRM_MIN_INTERVAL_MS, DEFAULT_MAP_CONFIG.osrmMinIntervalMs, 0, 10_000),
+    osrmMinIntervalMs: asClampedInt(
+      env.VITE_OSRM_MIN_INTERVAL_MS,
+      DEFAULT_MAP_CONFIG.osrmMinIntervalMs,
+      minIntervalFloor,
+      10_000,
+    ),
     osrmTimeoutMs: asClampedInt(env.VITE_OSRM_TIMEOUT_MS, DEFAULT_MAP_CONFIG.osrmTimeoutMs, 1000, 60_000),
+    // TTL 0 means "never expire" (see routing.ts cached()). Documented
+    // in MAPS.md; only set it deliberately.
     osrmCacheTtlMs: asClampedInt(env.VITE_OSRM_CACHE_TTL_MS, DEFAULT_MAP_CONFIG.osrmCacheTtlMs, 0, 3_600_000),
   };
+}
+
+/**
+ * Dev warnings for invalid map/routing env values. parseMapConfig
+ * silently falls back on bad input (a typo'd base URL would otherwise
+ * quietly point at the public demo server); getMapConfig surfaces
+ * these in development so misconfiguration is visible.
+ */
+export function mapConfigWarnings(env: Record<string, string | undefined>): string[] {
+  const warnings: string[] = [];
+  const checkUrl = (key: string) => {
+    const raw = env[key];
+    if (raw !== undefined && raw.trim() !== '' && !raw.trim().startsWith('http://') && !raw.trim().startsWith('https://')) {
+      warnings.push(`${key} is not an http(s) URL ("${raw}"); the default is used.`);
+    }
+  };
+  checkUrl('VITE_MAP_STYLE_URL');
+  checkUrl('VITE_MAP_RASTER_FALLBACK_URL');
+  checkUrl('VITE_OSRM_BASE_URL');
+  const provider = env.VITE_ROUTING_PROVIDER;
+  if (provider !== undefined && provider.trim() !== '' && !['osrm', 'mock', 'off'].includes(provider.trim().toLowerCase())) {
+    warnings.push(`VITE_ROUTING_PROVIDER "${provider}" is not osrm/mock/off; falling back to "mock".`);
+  }
+  const checkInt = (key: string) => {
+    const raw = env[key];
+    if (raw !== undefined && raw.trim() !== '' && !Number.isFinite(Number.parseInt(raw.trim(), 10))) {
+      warnings.push(`${key} "${raw}" is not a number; the default is used.`);
+    }
+  };
+  checkInt('VITE_OSRM_MIN_INTERVAL_MS');
+  checkInt('VITE_OSRM_TIMEOUT_MS');
+  checkInt('VITE_OSRM_CACHE_TTL_MS');
+  return warnings;
 }
 
 let cached: MapConfig | null = null;
@@ -128,6 +169,11 @@ export function getMapConfig(): MapConfig {
   if (cached) return cached;
   const env = (import.meta.env ?? {}) as Record<string, string | undefined>;
   cached = parseMapConfig(env);
+  if (typeof import.meta.env?.DEV === 'boolean' && import.meta.env.DEV) {
+    for (const warning of mapConfigWarnings(env)) {
+      console.warn(`[MeetSync map config] ${warning}`);
+    }
+  }
   return cached;
 }
 

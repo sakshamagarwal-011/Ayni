@@ -1,23 +1,26 @@
 import type { Coordinates, MeetingSpot, Participant, RouteEstimate, TravelMode } from '../types';
+import { hasFreshLocation } from '../coordination/expiry';
 
 export const EARTH_RADIUS_M = 6_371_000;
 
 /** Average speeds in km/h. Deterministic — no live traffic data. */
 export const MODE_SPEEDS_KMH: Record<TravelMode, number> = {
   walk: 5,
-  bike: 15,
+  // Scooter/two-wheeler: realistic urban average. "Bike" in this app
+  // means scooter (user choice 2026-11-17); there is no bicycle mode.
+  scooter: 25,
   car: 25,
   transit: 20,
 };
 
 export const MODE_LABELS: Record<TravelMode, string> = {
   walk: 'Walk',
-  bike: 'Bike',
+  scooter: 'Scooter',
   car: 'Car',
   transit: 'Transit',
 };
 
-export const TRAVEL_MODES: TravelMode[] = ['walk', 'bike', 'car', 'transit'];
+export const TRAVEL_MODES: TravelMode[] = ['walk', 'scooter', 'car', 'transit'];
 
 /** Haversine great-circle distance in metres. Pure and unit-testable. */
 export function haversineDistanceM(a: Coordinates, b: Coordinates): number {
@@ -45,8 +48,11 @@ export function buildRouteEstimate(
   participant: Participant,
   spot: MeetingSpot,
   mode: TravelMode,
+  now: Date = new Date(),
 ): RouteEstimate | null {
-  if (!participant.location) return null;
+  // Expired locations must never produce estimates: this is the choke
+  // point every estimate consumer shares (services + map routes).
+  if (!participant.location || !hasFreshLocation(participant, now)) return null;
   const from = { lat: participant.location.lat, lng: participant.location.lng };
   const distanceM = Math.round(haversineDistanceM(from, spot.location) * 1.3);
   return {
@@ -70,12 +76,13 @@ export function buildAllRouteEstimates(
   roomId: string,
   participants: Participant[],
   spots: MeetingSpot[],
+  now: Date = new Date(),
 ): RouteEstimate[] {
   const out: RouteEstimate[] = [];
   for (const p of participants) {
     for (const s of spots) {
       for (const mode of TRAVEL_MODES) {
-        const est = buildRouteEstimate(roomId, p, s, mode);
+        const est = buildRouteEstimate(roomId, p, s, mode, now);
         if (est) out.push(est);
       }
     }

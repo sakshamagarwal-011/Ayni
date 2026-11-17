@@ -21,6 +21,21 @@ describe('boundsForPoints (Turf bbox)', () => {
     expect(n - s).toBeCloseTo(0.04, 6);
   });
 
+  it('expands degenerate bounds when all points are co-located', () => {
+    const bounds = boundsForPoints([INDIRANAGAR, { ...INDIRANAGAR }, { ...INDIRANAGAR }]);
+    expect(bounds).not.toBeNull();
+    const [w, s, e, n] = bounds!;
+    expect(e).toBeGreaterThan(w);
+    expect(n).toBeGreaterThan(s);
+  });
+
+  it('expands bounds when points share only a latitude or longitude', () => {
+    const sameLat = boundsForPoints([INDIRANAGAR, { lat: INDIRANAGAR.lat, lng: 77.7 }]);
+    expect(sameLat![3]).toBeGreaterThan(sameLat![1]);
+    const sameLng = boundsForPoints([INDIRANAGAR, { lat: 13.0, lng: INDIRANAGAR.lng }]);
+    expect(sameLng![2]).toBeGreaterThan(sameLng![0]);
+  });
+
   it('returns null for no points', () => {
     expect(boundsForPoints([])).toBeNull();
   });

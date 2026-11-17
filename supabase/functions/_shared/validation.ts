@@ -45,6 +45,19 @@ export function validateLatLng(lat: unknown, lng: unknown): string | null {
   return null;
 }
 
+/**
+ * GPS fix accuracy in metres. Absent/null means "unknown" and keeps the
+ * historical default of 20 m. A provided value must be a finite number
+ * in 0..100000 and is rounded to an integer.
+ */
+export function validateAccuracyM(value: unknown): { error: string | null; accuracyM: number } {
+  if (value === undefined || value === null) return { error: null, accuracyM: 20 };
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100000) {
+    return { error: 'Accuracy must be a number between 0 and 100000 metres.', accuracyM: 20 };
+  }
+  return { error: null, accuracyM: Math.round(value) };
+}
+
 export function isUuid(value: unknown): value is string {
   return (
     typeof value === 'string' &&
