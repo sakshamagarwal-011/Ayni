@@ -135,12 +135,16 @@ export async function runOptimization(
   const discovered: CandidatePlace[] = [];
   let invalidRemoved = 0;
   let duplicatesRemoved = 0;
+  let placesEndpoint: string | undefined;
   try {
     for (const area of searchAreas) {
       const result = await deps.placesClient.search(area, input.category, placesPerArea, signal);
       discovered.push(...result.places);
       invalidRemoved += result.dropped;
       duplicatesRemoved += result.duplicatesRemoved;
+      // First served endpoint wins: in practice every area is served
+      // by the same endpoint (a rejecting endpoint rejects all areas).
+      placesEndpoint ??= result.endpoint;
     }
   } catch (err) {
     if (err instanceof EngineError) throw err;
@@ -320,6 +324,7 @@ export async function runOptimization(
       considered: considered.length,
       routePairs: pairs.length,
       routeFailures,
+      placesEndpoint,
     },
   };
 }

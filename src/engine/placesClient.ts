@@ -14,6 +14,14 @@ import type { CandidatePlace, MeetingCategory, SearchArea } from './types';
  * - Timeout via AbortController (default 25s, matching the QL timeout).
  * - At most ONE retry, only on 429/504, honouring Retry-After capped
  *   at 30s. No retry storms.
+ * - Endpoint fallback: if an endpoint fails (network error, non-2xx
+ *   including 406, timeout, invalid JSON), the next endpoint in
+ *   resolveOverpassEndpoints() is tried, sequentially — never in
+ *   parallel. The configured endpoint is always first; built-in
+ *   mirrors are fallback only. The default public instance rejects
+ *   requests from some networks (HTTP 406 from datacenter/cloud
+ *   egress), so a single-endpoint client would fail outright there.
+ *   The user's AbortSignal aborts the whole chain immediately.
  * - Failures become a typed EngineError ('places_unavailable') with a
  *   user-safe message — never an empty silent result, never a throw
  *   of an untyped string.
@@ -28,6 +36,37 @@ export interface PlacesSearchResult {
   places: CandidatePlace[];
   dropped: number;
   duplicatesRemoved: number;
+  /** Endpoint URL that served this search (absent for the mock client). */
+  endpoint?: string;
+}
+
+/**
+ * Built-in Overpass mirrors, tried in order after the configured
+ * endpoint. Public instances run by the OSM community; see
+ * https://wiki.openstreetmap.org/wiki/Overpass_API for the full list.
+ */
+export const OVERPASS_MIRROR_URLS: readonly string[] = [
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+];
+
+/**
+ * Endpoint order for one search: the configured URL first, then the
+ * built-in mirrors, deduplicated (a configured URL that equals a
+ * mirror is tried once). Trailing slashes are normalized so dedup
+ * cannot be defeated by `.../interpreter/`.
+ */
+export function resolveOverpassEndpoints(configuredUrl: string): string[] {
+  const endpoints: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of [configuredUrl, ...OVERPASS_MIRROR_URLS]) {
+    const url = raw.trim().replace(/\/+$/, '');
+    if (url !== '' && !seen.has(url)) {
+      seen.add(url);
+      endpoints.push(url);
+    }
+  }
+  return endpoints;
 }
 
 export interface PlacesClient {
@@ -129,7 +168,20 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
   const cache = new Map<string, { result: PlacesSearchResult; fetchedAt: number }>();
   const inflight = new Map<string, Promise<PlacesSearchResult>>();
 
-  async function runQuery(query: string, signal?: AbortSignal): Promise<PlacesSearchResult> {
+  const endpoints = resolveOverpassEndpoints(options.baseUrl);
+
+  /**
+   * One endpoint, with the existing retry discipline: at most one
+   * retry, only on 429/504, honouring Retry-After. Throws
+   * EngineUnavailableError when this endpoint is exhausted (the caller
+   * moves to the next endpoint) and rethrows AbortError when the
+   * caller aborted (the caller must stop the whole chain).
+   */
+  async function fetchFromEndpoint(
+    endpoint: string,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<PlacesSearchResult> {
     let attempt = 0;
     for (;;) {
       attempt += 1;
@@ -138,7 +190,7 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
       const onExternalAbort = () => controller.abort();
       signal?.addEventListener('abort', onExternalAbort, { once: true });
       try {
-        const response = await fetchImpl(options.baseUrl, {
+        const response = await fetchImpl(endpoint, {
           method: 'POST',
           body: `data=${encodeURIComponent(query)}`,
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -166,6 +218,7 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
           places: deduped.places,
           dropped: parsed.dropped,
           duplicatesRemoved: deduped.duplicatesRemoved,
+          endpoint,
         };
       } catch (err) {
         if (err instanceof EngineError) throw err;
@@ -182,6 +235,32 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
         signal?.removeEventListener('abort', onExternalAbort);
       }
     }
+  }
+
+  /**
+   * Try the endpoints in order, sequentially. Any endpoint failure
+   * (network error, non-2xx, timeout, invalid JSON) moves to the next
+   * endpoint; only a caller abort stops the chain. When every endpoint
+   * fails, the LAST endpoint's error is thrown, preserving the
+   * existing EngineUnavailableError message/behaviour (no ranked
+   * results, clear error).
+   */
+  async function runQuery(query: string, signal?: AbortSignal): Promise<PlacesSearchResult> {
+    let lastError: EngineUnavailableError | null = null;
+    for (const endpoint of endpoints) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      try {
+        return await fetchFromEndpoint(endpoint, query, signal);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') throw err;
+        if (err instanceof EngineUnavailableError) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastError ?? new EngineUnavailableError('places');
   }
 
   return {

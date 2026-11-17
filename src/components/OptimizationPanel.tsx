@@ -52,6 +52,15 @@ function toLocalInputValue(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/** Hostname of the Overpass endpoint that served a live search, for the one-line summary label. */
+function endpointHostname(endpoint: string): string {
+  try {
+    return new URL(endpoint).hostname;
+  } catch {
+    return endpoint;
+  }
+}
+
 export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: TravelMode }) {
   const [preference, setPreference] = useState<OptimizationPreference>('balanced');
   const [category, setCategory] = useState<MeetingCategory>('cafe');
@@ -372,6 +381,9 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
             {result.excluded.length > 0 ? `, ${result.excluded.length} excluded` : ''}
             {result.stats.routeFailures > 0
               ? `, ${result.stats.routeFailures} route request${result.stats.routeFailures === 1 ? '' : 's'} failed`
+              : ''}
+            {result.provider === 'osrm' && result.stats.placesEndpoint
+              ? ` · places via ${endpointHostname(result.stats.placesEndpoint)}`
               : ''}
             .
           </p>

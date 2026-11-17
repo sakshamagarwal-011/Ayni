@@ -199,11 +199,12 @@ describe('optimization happy path (mocked Overpass + OSRM)', () => {
 });
 
 describe('optimization failure modes (mocked APIs)', () => {
-  it('Overpass persistent 429 -> clear error, no results, one retry only', async () => {
+  it('Overpass persistent 429 -> clear error, no results, bounded retries across endpoints', async () => {
     const osrm = osrmStub();
     const overpass = overpassStub({ fail429Count: Infinity });
     await expect(runOptimization(input(), liveDeps(osrm, overpass))).rejects.toBeInstanceOf(EngineUnavailableError);
-    expect(overpass.calls()).toBe(2); // initial + one retry
+    // One retry per endpoint, three endpoints in the fallback chain: 6 calls, no retry storm.
+    expect(overpass.calls()).toBe(6);
     expect(osrm.calls()).toBe(0); // no routing attempted without places
     try {
       await runOptimization(input(), liveDeps(osrm, overpassStub({ fail429Count: Infinity })));

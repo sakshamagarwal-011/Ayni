@@ -185,6 +185,8 @@ export interface OptimizationStats {
   routePairs: number;
   /** Route requests that failed at the routing endpoint. */
   routeFailures: number;
+  /** Overpass endpoint URL that served the place search (live mode only; the first area's endpoint when areas differ). */
+  placesEndpoint?: string;
 }
 
 export interface OptimizationResult {

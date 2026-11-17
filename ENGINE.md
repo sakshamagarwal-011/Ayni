@@ -62,7 +62,7 @@ FinalNavigation ── useRouteAnimation + RouteAnimationControls ── Meeting
 | `src/engine/scoring.ts` | Step 8: mean/max/population-stddev + the three strategy scores. |
 | `src/engine/ranking.ts` | Steps 7/9/10: exclusions, stable sort, top 5, explanations. |
 | `src/engine/places.ts` | Steps 3–4 (pure): Overpass QL builder, response parser, dedup. |
-| `src/engine/placesClient.ts` | Overpass HTTP client (cache, in-flight dedup, 1 retry, timeout) + mock client. |
+| `src/engine/placesClient.ts` | Overpass HTTP client (cache, in-flight dedup, 1 retry, timeout, endpoint fallback) + mock client. |
 | `src/engine/orchestrator.ts` | Steps 1–10 in order + pre-filter + budget + live/demo path separation. |
 | `src/engine/config.ts` | Engine env vars + `resolveEngineMode()` (live needs BOTH providers). |
 | `src/engine/animation.ts` | Pure reveal/decimation/duration helpers. Routing-independent. |
@@ -135,6 +135,21 @@ and returns no ranked results.
   beyond light development use. The default endpoint was **not**
   verified live from this environment — see TESTING.md §7 for how to
   verify it.
+- Endpoint fallback: if the configured endpoint fails (network error,
+  non-2xx including HTTP 406, timeout, or invalid JSON), the client
+  tries the built-in mirrors in order —
+  `https://overpass.kumi.systems/api/interpreter`, then
+  `https://overpass.private.coffee/api/interpreter` — sequentially,
+  never in parallel. The configured URL is always tried first and the
+  list is deduplicated. This exists because overpass-api.de rejects
+  requests from some networks (HTTP 406 from datacenter/cloud egress,
+  observed 2026-11-17); residential users are usually unaffected, but
+  the search must not fail outright on a rejecting network. If every
+  endpoint fails, the run throws `EngineUnavailableError` with the
+  last endpoint's error, exactly as a single-endpoint failure did.
+  The endpoint that served a search is exposed as
+  `PlacesSearchResult.endpoint` / `stats.placesEndpoint` and shown in
+  the panel summary for live results.
 - Fair use: one sequential POST per search area (max 3 areas), capped
   result counts (default 30/area, max 50), query timeout derived from
   the client timeout (25s default, clamped 5–180s), no polling, no
@@ -227,7 +242,7 @@ message. Defaults (no env vars) are demo: zero external calls.
 | Failure | Behaviour |
 |---|---|
 | Invalid input | `OptimizationValidationError` listing every issue; no network calls. |
-| Overpass down / 429 / timeout | `EngineUnavailableError` ("Live place search is unavailable… No estimates shown."); one retry on 429/504 only. |
+| Overpass down / 429 / timeout | `EngineUnavailableError` ("Live place search is unavailable… No estimates shown."); one retry on 429/504 per endpoint, then the next mirror in the fallback list. |
 | No places found | `EngineNoPlacesError` naming the category + search area. |
 | Some routes fail | Those (participant, candidate) pairs are unreachable; candidates unreachable for a required participant are excluded with reasons. |
 | All routes fail (live) | `EngineUnavailableError` ("Live routing is unavailable… No estimates shown."); no ranked results. |
