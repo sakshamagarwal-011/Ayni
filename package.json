@@ -1,0 +1,39 @@
+{
+  "dependencies": {
+    "@supabase/supabase-js": "2.45.4",
+    "@turf/bbox": "7.4.0",
+    "@turf/center": "7.4.0",
+    "@turf/helpers": "7.4.0",
+    "framer-motion": "11.13.1",
+    "maplibre-gl": "4.7.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router-dom": "6.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.9.0",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.4.49",
+    "tailwindcss": "3.4.15",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vitest": "2.1.8"
+  },
+  "name": "meetsync-3d",
+  "private": true,
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "test": "vitest run tests/unit",
+    "test:all": "vitest run",
+    "test:integration": "vitest run tests/integration",
+    "test:rls": "vitest run tests/rls",
+    "test:maps": "vitest run tests/unit/routing.test.ts tests/unit/mapConfig.test.ts tests/unit/geo.test.ts tests/unit/style.test.ts tests/unit/geolocation.test.ts"
+  },
+  "type": "module",
+  "version": "0.5.0"
+}

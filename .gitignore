@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-ssr/
+.env
+.env.local
+.env.*.local
+!.env.example
+.DS_Store
+*.local
+supabase/.temp/

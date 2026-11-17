@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #070b1a;
+}
+
+body {
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .glass-card {
+    @apply rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur-md;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-900/40 transition hover:from-blue-500 hover:to-violet-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .input-field {
+    @apply w-full rounded-xl border border-white/15 bg-navy-900 px-4 py-3 text-sm text-white placeholder:text-slate-400 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-slate-200;
+  }
+  .field-error {
+    @apply mt-1.5 text-sm text-rose-300;
+  }
+}
+
+/* MapLibre popup + control styling to match the dark theme. Marker
+   elements themselves are styled inline in MeetingMap.tsx. */
+.maplibregl-popup-content {
+  background-color: #0b1128;
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.maplibregl-popup-tip {
+  border-top-color: #0b1128;
+  border-bottom-color: #0b1128;
+}
+
+.maplibregl-popup-close-button {
+  color: #cbd5e1;
+}
+
+.maplibregl-ctrl-group {
+  background-color: rgba(11, 17, 40, 0.92);
+}
+
+.maplibregl-ctrl-group button {
+  background-color: transparent;
+  filter: invert(0.85);
+}
+
+.maplibregl-ctrl-attrib {
+  background-color: rgba(11, 17, 40, 0.85);
+  color: #cbd5e1;
+  font-size: 10px;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: #93c5fd;
+}
+
+.maplibregl-ctrl-scale {
+  background-color: rgba(11, 17, 40, 0.6);
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.maplibregl-canvas:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: -2px;
+}
+
+/* Animated-route destination pulse + travel-time labels (Phase 4).
+   The pulse ring is pure CSS; reduced-motion users get a static dot. */
+.meetsync-destination-pulse {
+  width: 22px;
+  height: 22px;
+  border-radius: 9999px;
+  background-color: #a78bfa;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  position: relative;
+}
+
+.meetsync-destination-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -14px;
+  border-radius: 9999px;
+  border: 2px solid rgba(167, 139, 250, 0.8);
+  animation: meetsync-pulse 1.8s ease-out infinite;
+}
+
+@keyframes meetsync-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.meetsync-route-label {
+  background-color: rgba(11, 17, 40, 0.92);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 9999px;
+  padding: 3px 8px;
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meetsync-destination-pulse::after {
+    animation: none;
+    opacity: 0;
+  }
+}
