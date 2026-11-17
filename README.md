@@ -217,3 +217,7 @@ None material. Two clarifications, both documented where they occur:
 - **v0.4.0** — Optimization engine: fair ranking on real road times.
 - **v0.3.0** — Open-source maps: MapLibre + OpenStreetMap + OSRM.
 - **v0.2.0** — UI + Supabase integration (rooms, Realtime, Edge Functions).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
