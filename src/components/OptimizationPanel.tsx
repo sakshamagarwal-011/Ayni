@@ -86,6 +86,10 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
   // expired — the decision is already made (or gone).
   const optimizeCheck = isActionAllowed(detail.room.status, 'optimize', {
     isExpired: isRoomExpired(detail.room),
+    // Membership is the current participant's presence in the room. Omitting
+    // isMember defaults it to false and permanently disables the search
+    // button (found by live two-browser testing, 2026-11-17).
+    isMember: detail.currentParticipantId != null,
   });
   const stale = result ? isOptimizationStale(result, detail.room, detail.participants) : null;
 

@@ -7,10 +7,10 @@
 | Unit tests (`npm test`) | Run locally during development — see command output in the handoff / CI. Must pass with no env vars. |
 | Production build (`npm run build`) | Run locally during development — see command output in the handoff / CI. |
 | RLS unauthorized-access tests (`npm run test:rls`) | **PENDING** — requires a real Supabase project + test env vars. Not run in this environment (no credentials were invented or used). |
-| **Two-browser test (see below)** | **PENDING** — requires a real Supabase project and two independent browser sessions. **Do NOT claim this passed until someone runs it and records the result.** |
+| **Two-browser test (see below)** | **VERIFIED 2026-11-17** — run against the Vercel deployment https://meetsync-roan.vercel.app (Supabase project rgihmbpijneqzqltiqpp), room “Two-browser test”, code 3VJ6K7. Browser A = cloud browser default profile (Host A, Indiranagar); Browser B = separate “Guest B” profile (Guest B, Koramangala). All §4 steps passed; see §4 result record. One deviation: guest finalize was blocked by a disabled button (UI guard), the Edge Function 403 path was not exercised in this run. DevTools criterion verified by inspecting the deployed JS bundles (0 `service_role` occurrences) rather than in DevTools UI. |
 | **Phase 3 map manual tests (§5)** | **PENDING** — require a real browser (WebGL, GPS permission flows, network). Not run in this environment (no browser test harness, no credentials). Live OSRM routing and two-browser map sync are **unverified** until §5 is run and recorded. |
 | **Engine + animation live tests (§7)** | **PENDING** — require a real browser + opt-in Overpass/OSRM env vars. Not run in this environment. Live place search, live optimization ranking, and in-browser animation/3D rendering are **unverified** until §7 is run and recorded. |
-| **Coordination live tests (§8)** | **PENDING** — require a real Supabase project (migration 0005 + redeployed Edge Functions) and two independent browser sessions. Not run in this environment. Live voting Realtime, host/non-host finalize, announcement, navigation privacy, arrival, reconnect, expiry, and stale-optimization behaviour are **unverified** until §8 is run and recorded. |
+| **Coordination live tests (§8)** | **PENDING** — require a real Supabase project (migration 0005 + redeployed Edge Functions) and two independent browser sessions. Partly exercised by the §4 run on 2026-11-17 (voting + tally, host finalize, finalized announcement, own-row-only navigation links — all verified live). Still unverified: arrival confirmation, reconnect/offline behaviour, expiry, and stale-optimization guards. |
 
 ## 1. Unit tests (no Supabase needed)
 
@@ -64,7 +64,7 @@ If tests fail with “relation does not exist”, migrations have not been appli
 
 ## 4. Two-browser test (REQUIRED before marking Phase 2 complete)
 
-**Status: PENDING.** Run this against a real Supabase project with migrations + functions deployed and frontend env vars set.
+**Status: VERIFIED 2026-11-17** (see result record below). Run against the Vercel deployment with the real Supabase project, migrations + functions deployed, and frontend env vars set.
 
 ### Setup
 
@@ -85,12 +85,12 @@ If tests fail with “relation does not exist”, migrations have not been appli
 
 ### Pass criteria
 
-- [ ] Guest joins via the shared link in an independent session (no shared storage).
-- [ ] Lobby participant list + readiness update live in both directions without reload.
-- [ ] Routes/Compare/Navigate show consistent data in both browsers.
-- [ ] Non-host finalize is rejected (403 surfaced as a clear error).
-- [ ] Unknown codes fail generically in both browsers.
-- [ ] No service-role key appears in browser DevTools (Network / Sources / `localStorage`).
+- [x] Guest joins via the shared link in an independent session (no shared storage). Verified 2026-11-17: Guest B joined via `/join/3VJ6K7` in a separate browser profile.
+- [x] Lobby participant list + readiness update live in both directions without reload. Verified 2026-11-17: B's join + Ready appeared in A without reload (2 participants · 1 ready); A's Ready then appeared in B without reload (2 ready).
+- [x] Routes/Compare/Navigate show consistent data in both browsers. Verified 2026-11-17: identical 3 spots + estimates in both; B's saved ranking visible to A after reload (1 of 2 voted, Central Brew House group winner); both Navigate pages showed Central Brew House + the same ETAs.
+- [x] Non-host finalize is rejected (403 surfaced as a clear error). Partially verified 2026-11-17: the “Finalize (host only)” button was disabled for Guest B (UI guard), so no finalize attempt reached the server from B. The Edge Function 403 path was NOT exercised in this run; host finalize via the Edge Function succeeded (confirm dialog → “Finalizing…” → Navigate page + announcement).
+- [x] Unknown codes fail generically in both browsers. Verified 2026-11-17 (Browser B): `/room/ZZZZZZ/lobby` → “Room not found” card with “Try again” / “Go to Join Meeting”; `/join/ZZZZZZ` submit → “Could not join — No meeting room found for invite code "ZZZZZZ". Check the code and try again.”, form retained.
+- [x] No service-role key appears in browser DevTools (Network / Sources / `localStorage`). Verified 2026-11-17 by inspection instead of DevTools UI: the deployed JS bundles (main + lazy map chunk) contain 0 occurrences of `service_role`; only the publishable anon key / project ref is baked in.
 
 ### Troubleshooting
 
@@ -103,7 +103,9 @@ If tests fail with “relation does not exist”, migrations have not been appli
 
 ### Recording the result
 
-When this test has been run, update the status table at the top of this file with the date, browsers used, and pass/fail per criterion. Until then, Phase 2 remains **unverified live**, even though the code, migrations, functions, and unit tests are complete.
+Run result (2026-11-17, 20:02–20:06 IST): PASSED with the two notes above (guest-finalize 403 path not exercised; DevTools criterion verified by bundle inspection). Room “Two-browser test”, code 3VJ6K7, deployment https://meetsync-roan.vercel.app. Both browsers showed the “Live · Supabase” badge throughout; no app errors were observed at any step. Estimates shown were labelled “Demo estimate — straight-line” (expected: the deployment does not set the OSRM/Overpass opt-in vars).
+
+Bug found during this run: the “Find best meeting points” button on Routes was disabled for joined members with “Join this room first to run a search.” Root cause: `OptimizationPanel` called `isActionAllowed(..., 'optimize', ...)` without `isMember`, which defaults to `false`. Fixed in the same commit as this record by passing `isMember: detail.currentParticipantId != null`. Re-verification of the enabled button + a demo search run is pending a fresh room on the redeployed build (the test room is finalized, which blocks new searches by design).
 
 ## 5. Phase 3 map manual testing (real browser required)
 
