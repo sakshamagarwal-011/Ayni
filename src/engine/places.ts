@@ -24,6 +24,14 @@ import type { CandidatePlace, MeetingCategory, SearchArea } from './types';
  * - Timeout 45s: weak mirrors need more patience than the 25s the
  *   public overpass-api.de guidance suggests for interactive queries.
  *   Result count is capped (see buildOverpassQuery).
+ *
+ * MIRROR WARNING: the query builder (buildOverpassQuery), category
+ * tags (CATEGORY_TAGS), bbox math (bboxForSearchArea), label logic
+ * (categoryLabelForTags), and response parsing (parseOverpassResponse
+ * + deduplicatePlaces) are DUPLICATED in the Supabase Edge Function
+ * supabase/functions/places-search/index.ts (Deno cannot import the
+ * Vite bundle). The two copies MUST stay in sync — change one, change
+ * the other. See ENGINE.md ("Places proxy") for the contract.
  */
 
 export const OVERPASS_TIMEOUT_SECONDS = 45;

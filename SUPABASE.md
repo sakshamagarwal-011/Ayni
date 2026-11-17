@@ -65,6 +65,7 @@ Functions live in `supabase/functions/`:
 | `join-room` | Verify JWT → normalize code → idempotent participant upsert; expired rooms → 410; finalized rooms joinable for viewing |
 | `update-location` | Verify JWT + membership → upsert own location (expires +2h); expired rooms → 410 |
 | `finalize-meeting` | Verify JWT + host → optimistic-lock finalize (version guard, 409 stale/already-finalized, 410 expired) |
+| `places-search` | Verify JWT → structured place search → build Overpass QL server-side → sequential endpoint fallback → parse/dedup/circle-filter → return places. No service-role key, no database access. Required for `VITE_PLACES_PROVIDER=proxy` (see ENGINE.md). Status 2026-11-17: deployed, but currently returns 502 — Overpass is unreachable from Supabase's network too; use `VITE_PLACES_PROVIDER=photon` for live search |
 | `cleanup-expired-locations` | Cron-secret auth → delete expired locations + mark expired rooms + prune old rooms (retention configurable) |
 
 Deploy (CLI):
@@ -74,6 +75,7 @@ supabase functions deploy create-room
 supabase functions deploy join-room
 supabase functions deploy update-location
 supabase functions deploy finalize-meeting
+supabase functions deploy places-search
 supabase functions deploy cleanup-expired-locations
 ```
 

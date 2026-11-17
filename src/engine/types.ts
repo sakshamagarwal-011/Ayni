@@ -102,8 +102,8 @@ export interface CandidatePlace {
   address?: string;
   /** Raw OSM tags, kept for debugging/labels. Never shown raw in the UI. */
   tags?: Record<string, string>;
-  /** Where the place came from: 'overpass' (live OSM data) or 'mock' (demo spots). */
-  source: 'overpass' | 'mock';
+  /** Where the place came from: 'overpass'/'photon' (live OSM data) or 'mock' (demo spots). */
+  source: 'overpass' | 'photon' | 'mock';
 }
 
 /** One road-network travel result. `source` is 'osrm' for live routes and 'demo' for deterministic demo estimates. Never mixed. */

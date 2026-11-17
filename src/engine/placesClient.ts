@@ -73,7 +73,7 @@ export function resolveOverpassEndpoints(configuredUrl: string): string[] {
 }
 
 export interface PlacesClient {
-  readonly provider: 'overpass' | 'mock';
+  readonly provider: 'overpass' | 'proxy' | 'photon' | 'mock';
   search(area: SearchArea, category: MeetingCategory, limit: number, signal?: AbortSignal): Promise<PlacesSearchResult>;
 }
 
@@ -127,8 +127,8 @@ function sleepAbortable(ms: number, signal: AbortSignal | undefined, sleepFn: (m
   });
 }
 
-/** Share an in-flight result with a second caller whose own signal can still cancel THEIR wait. */
-function shareInflight<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+/** Share an in-flight result with a second caller whose own signal can still cancel THEIR wait. Exported for the proxy places client, which shares the same wait semantics. */
+export function shareInflight<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return pending;
   if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
   return new Promise<T>((resolve, reject) => {

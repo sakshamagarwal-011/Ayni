@@ -57,7 +57,8 @@ supabase/
   migrations/   0001 schema, 0002 RLS, 0003 Realtime + expiry, 0004 no-seed,
                 0005 coordination (decision version, arrival, expire_rooms)
   functions/    create-room, join-room, update-location,
-                finalize-meeting, cleanup-expired-locations + _shared/
+                finalize-meeting, places-search,
+                cleanup-expired-locations + _shared/
 tests/
   unit/         Validation, invite-code, haversine + route-estimate tests,
                 map tests, engine tests (scoring, validation, search

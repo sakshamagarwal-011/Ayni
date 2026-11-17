@@ -127,6 +127,60 @@ and returns no ranked results.
 
 ## Providers, limits, and budgets
 
+### Photon (places) — recommended live default as of 2026-11-17
+
+- Why: live testing (2026-11-17) proved browsers on cloud/datacenter
+  networks cannot query Overpass directly (overpass-api.de rejects
+  them with HTTP 406, the small mirrors time out server-side), and
+  the Supabase proxy cannot reach Overpass either (HTTP 502 from
+  Supabase's network). Photon category search was verified live in a
+  browser on the same day — `include=osm.amenity.cafe` + bbox returns
+  real cafés regardless of name, and `include=osm.railway.station`
+  finds metro stations — so Photon is the working live places path.
+  Enable with `VITE_PLACES_PROVIDER=photon` (plus
+  `VITE_ROUTING_PROVIDER=osrm` for live mode); the panel badge reads
+  "Live · Photon + OSRM". The direct `overpass` and `proxy`
+  providers are unchanged and remain available for self-hosters;
+  there is no cross-provider fallback.
+- Default endpoint: `https://photon.komoot.io` (public instance,
+  shared infrastructure). Override with `VITE_PHOTON_URL`
+  (self-hosted Photon) for anything beyond light development use.
+- Mechanism: Photon categories carry only the main OSM tag
+  (`osm.<key>.<value>`), so each meeting category maps to one or
+  more `include` values (see `PHOTON_INCLUDE_CATEGORIES` in
+  `src/engine/photonClient.ts`). ONE GET request is issued PER
+  include-category, strictly sequentially — verified live:
+  comma-combined include values do NOT mix; one category dominates
+  the results. Each request is a category-only search (no `q`
+  word): `GET {base}/api/?include=<cat>&bbox=<west>,<south>,<east>,
+  <north>&lat=<center>&lon=<center>&limit=<n>&lang=en`, where the
+  bbox encloses the search circle (Photon bbox order is
+  minLon,minLat,maxLon,maxLat). Per-category limit is
+  `max(3, ceil(limit / numCategories))`; results are trimmed back
+  to the circle client-side (same honest counting as Overpass).
+- Honest approximations: `metroStation` returns ALL railway
+  stations (Photon categories cannot distinguish
+  `station=subway`/`light_rail`), so stations are labelled
+  "Railway station" from their tags, never claimed as metro;
+  `teaStall` returns cafés/fast-food in the circle (`cuisine` is a
+  secondary tag Photon cannot filter on), labelled "Café"/"Fast
+  food" from their tags, never invented as tea stalls.
+- Fair use: sequential requests only, minimum 1000ms gap between
+  request starts, 15s timeout per request, at most one retry only
+  on 429/504 honouring `Retry-After` capped at 30s, 10-minute
+  cache (search-parameter key) + in-flight dedup. If ANY category
+  request fails (after its retry), the whole search fails with
+  `EngineUnavailableError` — a partial category set would silently
+  bias the ranking, so no partial results are ever returned. The
+  serving endpoint is exposed as `PlacesSearchResult.endpoint` /
+  `stats.placesEndpoint` and shown in the panel summary for live
+  results ("places via photon.komoot.io").
+- Identity/dedup: OSM type+id from `osm_type`/`osm_id` (Photon
+  uses single letters N/W/R). Features without finite in-range
+  coordinates, without a non-empty name, or without a usable OSM
+  identity are dropped (counted). Dedup across categories is
+  first-wins. `stats.discovered` counts unique places after dedup.
+
 ### Overpass (places)
 
 - Default endpoint: `https://overpass-api.de/api/interpreter`
@@ -183,6 +237,60 @@ and returns no ranked results.
   overlapping areas is routed once. `stats.discovered` counts unique
   places after dedup; `generatedAt` is stamped when the run returns,
   not when it starts.
+
+### Places proxy (Supabase Edge Function)
+
+- Why: live testing (2026-11-17) proved browsers on cloud/datacenter
+  networks cannot query Overpass directly — overpass-api.de rejects
+  them with HTTP 406, and the small mirrors time out server-side even
+  on light bbox queries. Supabase is reachable from every network the
+  app runs on, so the `places-search` Edge Function queries Overpass
+  server-side and the browser talks only to Supabase. Enable with
+  `VITE_PLACES_PROVIDER=proxy` (plus `VITE_ROUTING_PROVIDER=osrm` for
+  live mode); the panel badge reads "Live · Places + OSRM". The
+  direct `overpass` provider is unchanged and remains available for
+  networks that can reach Overpass; there is no
+  cross-provider fallback.
+- Status (2026-11-17): the function is deployed, but currently
+  returns HTTP 502 — Overpass is unreachable from Supabase's network
+  too, so the proxy cannot serve searches until that changes. The
+  Photon provider (above) is the working live path.
+- Contract: the browser sends structured parameters only —
+  `{ centerLat, centerLng, radiusKm, category, limit }` — and NEVER
+  raw Overpass QL (the function builds the query itself, so it cannot
+  be abused to run arbitrary queries). The function validates
+  strictly (lat/lng ranges, category allow-list; radius clamped to
+  0.5–25 km, limit clamped to 1–50; 400 on invalid input) and returns
+  `{ places: [{ osmId, name, category, lat, lng, address? }], dropped,
+  duplicatesRemoved, outsideCircle, endpoint }`, where `endpoint` is
+  the serving Overpass URL (shown as "places via \<hostname\>" exactly
+  like the direct client). On total upstream failure it returns HTTP
+  502 `{ error: 'places_unavailable' }` without leaking upstream
+  bodies or statuses.
+- Auth: a valid user JWT is required (default `verify_jwt = true`;
+  401 without one). The function needs NO service-role key and NO
+  database access — it only fetches a public API.
+- Server-side behaviour mirrors the direct client: the SAME bbox
+  query shape (node/way, `["name"]`, `out center <limit>`, QL timeout
+  20s), the same parse/drop/dedup rules, and the circle filter applied
+  server-side (the browser client re-applies it as defense in depth).
+  Endpoints are tried sequentially in the same order
+  (overpass-api.de, kumi.systems, private.coffee), 20s per endpoint,
+  one retry only on 429/504 honouring `Retry-After` capped at 30s.
+  A 200 response carrying a "Query timed out" remark with zero
+  elements counts as an endpoint failure (fall through to the next
+  endpoint), since that is how weak mirrors report an unanswered
+  query; a remark WITH elements is still a usable result.
+  Fair-use discipline is unchanged: sequential requests, capped
+  result counts, 10-minute client-side cache, in-flight dedup.
+- MIRROR WARNING: the function's query builder, category tags, bbox
+  math, label logic, and response parsing DUPLICATE
+  `src/engine/places.ts` (Deno cannot import the Vite bundle). Change
+  one, change the other — see the MIRROR comments in both files.
+- Client timeout: 55s (covers the function's worst case). A client
+  timeout surfaces the same timeout message as the direct client.
+  The function must be deployed (`supabase functions deploy
+  places-search`) before `proxy` mode can work — see SUPABASE.md.
 
 ### OSRM (routing)
 
@@ -299,6 +407,7 @@ visible.
 
 | Swap | How |
 |---|---|
+| Self-hosted Photon | Set `VITE_PHOTON_URL`. No code changes. |
 | Self-hosted Overpass / mirror | Set `VITE_OVERPASS_URL`. No code changes. |
 | Self-hosted OSRM | Set `VITE_OSRM_BASE_URL` (+ `VITE_ROUTING_PROVIDER=osrm`). Optionally lower `VITE_OSRM_MIN_INTERVAL_MS` for your own server. |
 | Another places source | Implement `PlacesClient` (same `search()` shape) and wire it in `OptimizationPanel`. Keep the cache/retry discipline. |
@@ -308,7 +417,8 @@ visible.
 ## Testing
 
 - Unit: `npm test` — scoring (exact values), validation, search
-  areas, Overpass QL/parsing/dedup, animation geometry, ranking,
+  areas, Overpass QL/parsing/dedup, Photon category requests/
+  parsing/dedup, animation geometry, ranking,
   engine config, immersive-3D capability, strict OSRM mode.
 - Integration (mocked APIs): `npm run test:integration` — full
   orchestrator runs against fixture Overpass/OSRM responses:

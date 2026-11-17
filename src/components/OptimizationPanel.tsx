@@ -17,6 +17,8 @@ import {
   createOsrmEngineRoutingAdapter,
   getEngineConfig,
   getSharedOverpassClient,
+  getSharedPhotonClient,
+  getSharedProxyPlacesClient,
   resolveEngineMode,
   runOptimization,
   type CandidatePlace,
@@ -27,6 +29,7 @@ import {
 } from '../engine';
 import { formatDistance, formatDuration, osmDirectionsUrl } from '../lib/utils';
 import { MODE_LABELS } from '../lib/distance';
+import { getSupabaseClient } from '../lib/supabaseClient';
 import { getMapConfig } from '../map/config';
 import { getDefaultRoutingClient } from '../map/routing';
 import type { RoomDetail, TravelMode } from '../types';
@@ -34,9 +37,9 @@ import type { RoomDetail, TravelMode } from '../types';
 /**
  * Smart meeting-point search panel (Route Discovery, additive section).
  *
- * Runs the open-source optimization engine (Overpass places + OSRM
- * road routing in live mode; mock places + demo estimates in demo
- * mode) and renders the top 5 with explanations. Engine failures show
+ * Runs the open-source optimization engine (Photon/Overpass places
+ * + OSRM road routing in live mode; mock places + demo estimates in
+ * demo mode) and renders the top 5 with explanations. Engine failures show
  * an error banner here only — the existing spot list below is never
  * hidden or replaced.
  *
@@ -52,7 +55,7 @@ function toLocalInputValue(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-/** Hostname of the Overpass endpoint that served a live search, for the one-line summary label. */
+/** Hostname of the places endpoint that served a live search, for the one-line summary label. */
 function endpointHostname(endpoint: string): string {
   try {
     return new URL(endpoint).hostname;
@@ -120,6 +123,14 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
       setError(resolved.reason);
       return;
     }
+    // Proxy mode needs the Supabase client: the places proxy is an
+    // Edge Function, so without a configured Supabase project there
+    // is nothing to call. Surface the unavailable path, never crash.
+    const supabase = getSupabaseClient();
+    if (resolved.mode === 'live' && engineConfig.placesProvider === 'proxy' && !supabase) {
+      setError('Live place search is unavailable — Supabase is not configured, and the places proxy is a Supabase Edge Function.');
+      return;
+    }
     if (!consent) {
       setError('Please tick the consent checkbox before running a search.');
       return;
@@ -181,7 +192,15 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
         },
         {
           placesClient: live
-            ? getSharedOverpassClient({ baseUrl: engineConfig.overpassUrl, timeoutMs: engineConfig.overpassTimeoutMs })
+            ? engineConfig.placesProvider === 'proxy'
+              ? getSharedProxyPlacesClient({
+                  // Non-null: the guard above returns early when
+                  // Supabase is unconfigured in proxy mode.
+                  invokeFn: (name, options) => supabase!.functions.invoke(name, options),
+                })
+              : engineConfig.placesProvider === 'photon'
+                ? getSharedPhotonClient({ baseUrl: engineConfig.photonUrl })
+                : getSharedOverpassClient({ baseUrl: engineConfig.overpassUrl, timeoutMs: engineConfig.overpassTimeoutMs })
             : createMockPlacesClient(demoPlaces),
           routingClient: live
             ? createOsrmEngineRoutingAdapter(getDefaultRoutingClient())
@@ -238,7 +257,11 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
         <h2 className="font-semibold text-white">Smart meeting points</h2>
         {resolved.mode === 'live' ? (
           <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-xs font-medium text-emerald-200">
-            Live · Overpass + OSRM
+            {engineConfig.placesProvider === 'proxy'
+              ? 'Live · Places + OSRM'
+              : engineConfig.placesProvider === 'photon'
+                ? 'Live · Photon + OSRM'
+                : 'Live · Overpass + OSRM'}
           </span>
         ) : resolved.mode === 'demo' ? (
           <span className="rounded-full border border-amber-400/40 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-200">
@@ -324,8 +347,9 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
           className="mt-0.5 h-5 w-5 shrink-0 accent-violet-500"
         />
         <span>
-          I consent to sharing my location for this search. In live mode, participant coordinates are sent to the
-          Overpass and OSRM public servers to find places and compute road routes. Locations expire after 2 hours.
+          I consent to sharing my location for this search. In live mode, participant coordinates are sent to the{' '}
+          {engineConfig.placesProvider === 'photon' ? 'Photon' : 'Overpass'} and OSRM public servers to find places
+          and compute road routes. Locations expire after 2 hours.
         </span>
       </label>
 

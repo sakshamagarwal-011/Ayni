@@ -16,4 +16,6 @@ export * from './animation';
 export * from './signature';
 export * from './config';
 export * from './placesClient';
+export * from './proxyPlacesClient';
+export * from './photonClient';
 export * from './orchestrator';

@@ -10,13 +10,14 @@ import type { RoutingProvider } from '../map/config';
  * Pure parser (unit-testable), mirroring parseMapConfig's style.
  */
 
-export type PlacesProvider = 'overpass' | 'mock' | 'off';
+export type PlacesProvider = 'overpass' | 'proxy' | 'photon' | 'mock' | 'off';
 
 export interface EngineConfig {
   enabled: boolean;
   placesProvider: PlacesProvider;
   overpassUrl: string;
   overpassTimeoutMs: number;
+  photonUrl: string;
   /** Max candidates carried from discovery into routing (after pre-filter). Hard cap 20. */
   maxCandidates: number;
   /** Max unique route pairs per optimization run. Exceeding this aborts with a clear error. */
@@ -27,11 +28,14 @@ export interface EngineConfig {
 
 export const DEFAULT_OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
 
+export const DEFAULT_PHOTON_URL = 'https://photon.komoot.io';
+
 export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   enabled: true,
   placesProvider: 'mock',
   overpassUrl: DEFAULT_OVERPASS_URL,
   overpassTimeoutMs: 45_000,
+  photonUrl: DEFAULT_PHOTON_URL,
   maxCandidates: 12,
   maxOsrmRequests: 60,
   placesPerArea: 30,
@@ -45,7 +49,7 @@ function asHttpUrl(raw: string | undefined, fallback: string): string {
 
 function asPlacesProvider(raw: string | undefined): PlacesProvider {
   const value = (raw ?? '').trim().toLowerCase();
-  if (value === 'overpass' || value === 'mock' || value === 'off') return value;
+  if (value === 'overpass' || value === 'proxy' || value === 'photon' || value === 'mock' || value === 'off') return value;
   return DEFAULT_ENGINE_CONFIG.placesProvider;
 }
 
@@ -73,6 +77,7 @@ export function parseEngineConfig(env: Record<string, string | undefined>): Engi
       1000,
       60_000,
     ),
+    photonUrl: asHttpUrl(env.VITE_PHOTON_URL, DEFAULT_ENGINE_CONFIG.photonUrl).replace(/\/+$/, ''),
     maxCandidates: asClampedInt(
       env.VITE_OPTIMIZATION_MAX_CANDIDATES,
       DEFAULT_ENGINE_CONFIG.maxCandidates,
@@ -134,9 +139,15 @@ export function resolveEngineMode(
   if (engine.placesProvider === 'overpass' && routingProvider === 'osrm') {
     return { mode: 'live', reason: 'Live search: Overpass places + OSRM road routing.' };
   }
+  if (engine.placesProvider === 'proxy' && routingProvider === 'osrm') {
+    return { mode: 'live', reason: 'Live search: places via the Supabase proxy + OSRM road routing.' };
+  }
+  if (engine.placesProvider === 'photon' && routingProvider === 'osrm') {
+    return { mode: 'live', reason: 'Live search: Photon places + OSRM road routing.' };
+  }
   return {
     mode: 'demo',
     reason:
-      'Demo search: mock places + demo estimates. Enable live search with VITE_PLACES_PROVIDER=overpass and VITE_ROUTING_PROVIDER=osrm.',
+      'Demo search: mock places + demo estimates. Enable live search with VITE_PLACES_PROVIDER=photon (or overpass/proxy) and VITE_ROUTING_PROVIDER=osrm.',
   };
 }
