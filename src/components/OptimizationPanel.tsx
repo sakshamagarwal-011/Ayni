@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ErrorBanner } from './ErrorBanner';
 import {
   isActionAllowed,
@@ -19,6 +20,8 @@ import {
   getSharedOverpassClient,
   getSharedPhotonClient,
   getSharedProxyPlacesClient,
+  isLiveSearchResult,
+  publishPlacesFromRanked,
   resolveEngineMode,
   runOptimization,
   type CandidatePlace,
@@ -30,6 +33,7 @@ import {
 import { formatDistance, formatDuration, osmDirectionsUrl } from '../lib/utils';
 import { MODE_LABELS } from '../lib/distance';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { getRoomService } from '../services';
 import { getMapConfig } from '../map/config';
 import { getDefaultRoutingClient } from '../map/routing';
 import type { RoomDetail, TravelMode } from '../types';
@@ -73,6 +77,10 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<OptimizationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  // The result set already published (by identity): a new search
+  // produces a new result object, which re-enables publishing.
+  const [published, setPublished] = useState<{ result: OptimizationResult; count: number } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const engineConfig = useMemo(() => getEngineConfig(), []);
@@ -110,11 +118,64 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
     // button (found by live two-browser testing, 2026-11-17).
     isMember: detail.currentParticipantId != null,
   });
+  // Same membership rule as optimize: isMember MUST be passed
+  // explicitly (see above) or publishing is permanently disabled.
+  const publishCheck = isActionAllowed(detail.room.status, 'publish', {
+    isExpired: isRoomExpired(detail.room),
+    isMember: detail.currentParticipantId != null,
+  });
   const stale = result ? isOptimizationStale(result, detail.room, detail.participants) : null;
+  // Only live results can be published (demo results ARE the room's
+  // spots already). The published state keys off the result object so
+  // a new search re-enables publishing for the new result set.
+  const publishable = isLiveSearchResult(result);
+  const alreadyPublished = published !== null && published.result === result;
+
+  async function publishResults() {
+    if (!result || !publishable || alreadyPublished || publishing) return;
+    if (!publishCheck.allowed) {
+      setError(publishCheck.reason ?? 'Publishing is not available for this room.');
+      return;
+    }
+    setError(null);
+    setPublishing(true);
+    try {
+      const outcome = await getRoomService().publishResults(
+        detail.room.id,
+        publishPlacesFromRanked(result.ranked),
+      );
+      // Persist the engine order with the RETURNED spot ids and the
+      // RETURNED decision version, so this browser's Compare page
+      // shows the published spots in engine order. The version check
+      // on read means a stale order is never reused after the room
+      // changes again.
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          saveEngineSpotOrder(sessionStorage, detail.room.id, {
+            spotIds: outcome.spots.map((s) => s.id),
+            decisionVersion: outcome.decisionVersion,
+            generatedAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // Storage unavailable — the comparison page falls back to
+        // tally order. The publish itself already succeeded.
+      }
+      setPublished({ result, count: outcome.spots.length });
+    } catch (err) {
+      // CoordinationError messages are user-safe; anything else falls
+      // back to a generic message rather than leaking internals.
+      if (err instanceof Error) setError(err.message);
+      else setError('Failed to add these places to the vote. Try again.');
+    } finally {
+      setPublishing(false);
+    }
+  }
 
   async function runSearch() {
     setError(null);
     setResult(null);
+    setPublished(null);
     if (!optimizeCheck.allowed) {
       setError(optimizeCheck.reason ?? 'Optimization is not available for this room.');
       return;
@@ -416,6 +477,39 @@ export function OptimizationPanel({ detail, mode }: { detail: RoomDetail; mode: 
               {w}
             </p>
           ))}
+          {publishable && !alreadyPublished && (
+            <div>
+              <button
+                type="button"
+                onClick={() => void publishResults()}
+                disabled={publishing || !publishCheck.allowed}
+                className="btn-primary"
+              >
+                {publishing ? 'Adding…' : 'Add these places to the vote'}
+              </button>
+              <p className="mt-2 text-sm text-slate-300">
+                Everyone in the room will see them on Compare &amp; vote.
+              </p>
+              {!publishCheck.allowed && publishCheck.reason && (
+                <p className="mt-1 text-xs text-slate-400" role="status">
+                  {publishCheck.reason}
+                </p>
+              )}
+            </div>
+          )}
+          {publishable && alreadyPublished && (
+            <div>
+              <p className="text-sm text-emerald-200" role="status">
+                Added to the vote — {published?.count ?? 0} places now on Compare &amp; vote.
+              </p>
+              <Link
+                to={`/room/${detail.room.inviteCode}/compare`}
+                className="mt-1 inline-block text-sm font-medium text-violet-300 hover:text-violet-200"
+              >
+                Published ✓ — view on Compare &amp; vote
+              </Link>
+            </div>
+          )}
           {result.ranked.length === 0 && (
             <p className="text-sm text-slate-300">
               {result.stats.routeFailures > 0

@@ -26,7 +26,7 @@
 import type { MeetingRoom, RoomStatus } from '../types';
 import { CoordinationError, type CoordinationErrorCode } from './errors';
 
-export type RoomAction = 'vote' | 'finalize' | 'optimize' | 'join' | 'updateLocation' | 'arrive';
+export type RoomAction = 'vote' | 'finalize' | 'optimize' | 'publish' | 'join' | 'updateLocation' | 'arrive';
 
 export interface TransitionActor {
   isHost: boolean;
@@ -169,8 +169,10 @@ export interface ActionContext {
  * Supabase service guards. The Edge Functions enforce the same rules
  * server-side; RLS is the final backstop.
  *
- * - vote / optimize: open states, members only, not expired. Voting is
- *   closed once finalized (the outcome must not change).
+ * - vote / optimize / publish: open states, members only, not expired.
+ *   Voting is closed once finalized (the outcome must not change);
+ *   publishing follows the same rules as optimize because it extends
+ *   a search result into the room's votable spots.
  * - finalize: open states, host only, not expired.
  * - join: open states and finalized (view-only: a late joiner can see
  *   the announcement and navigate, but cannot vote or change the
@@ -222,6 +224,18 @@ export function isActionAllowed(status: RoomStatus, action: RoomAction, context:
       }
       if (!isMember) {
         return { allowed: false, reason: 'Join this room first to run a search.', code: 'NOT_MEMBER' };
+      }
+      return { allowed: true };
+    case 'publish':
+      if (status === 'finalized') {
+        return {
+          allowed: false,
+          reason: 'This meeting is already finalized, so new spots cannot be published.',
+          code: 'ALREADY_FINALIZED',
+        };
+      }
+      if (!isMember) {
+        return { allowed: false, reason: 'Join this room first to publish search results.', code: 'NOT_MEMBER' };
       }
       return { allowed: true };
     case 'finalize':

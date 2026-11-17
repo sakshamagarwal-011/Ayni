@@ -247,8 +247,9 @@ export function SpotComparison() {
       <div>
         <h1 className="text-2xl font-bold text-white sm:text-3xl">Compare & vote</h1>
         <p className="mt-1 text-sm text-slate-300">
-          Rank the spots — #1 is your top choice. Use the up/down buttons to reorder, then save your vote. Spots shown
-          are demo data (see the &ldquo;Demo spot&rdquo; tag on each card); see Route Discovery for the map.
+          Rank the spots — #1 is your top choice. Use the up/down buttons to reorder, then save your vote. Spots
+          tagged &ldquo;Demo spot&rdquo; are demo data and spots tagged &ldquo;Live place&rdquo; came from a live
+          search; see Route Discovery for the map.
         </p>
         <p className="mt-2 text-sm text-slate-300">
           {participation.votedCount} of {participation.totalCount} participants voted.

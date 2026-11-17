@@ -172,6 +172,20 @@ describe('isActionAllowed', () => {
     expect(isActionAllowed('finalized', 'optimize', { isMember: true }).code).toBe('ALREADY_FINALIZED');
     expect(isActionAllowed('lobby', 'optimize', { isMember: true, isExpired: true }).code).toBe('EXPIRED');
   });
+  it('publish: same rules as optimize — members in open states; blocked when finalized or expired', () => {
+    expect(isActionAllowed('lobby', 'publish', { isMember: true }).allowed).toBe(true);
+    expect(isActionAllowed('discovering', 'publish', { isMember: true }).allowed).toBe(true);
+    expect(isActionAllowed('comparing', 'publish', { isMember: true }).allowed).toBe(true);
+    // Host is NOT required: any member may publish their search.
+    expect(isActionAllowed('lobby', 'publish', { isMember: true, isHost: false }).allowed).toBe(true);
+    // Omitted isMember defaults to false (the f003c8b lesson): the
+    // call site must pass membership explicitly.
+    expect(isActionAllowed('lobby', 'publish', {}).code).toBe('NOT_MEMBER');
+    expect(isActionAllowed('lobby', 'publish', { isMember: false }).code).toBe('NOT_MEMBER');
+    expect(isActionAllowed('finalized', 'publish', { isMember: true }).code).toBe('ALREADY_FINALIZED');
+    expect(isActionAllowed('lobby', 'publish', { isMember: true, isExpired: true }).code).toBe('EXPIRED');
+    expect(isActionAllowed('expired', 'publish', { isMember: true }).code).toBe('EXPIRED');
+  });
   it('join: allowed in open and finalized states (view-only), blocked when expired', () => {
     expect(isActionAllowed('lobby', 'join', {}).allowed).toBe(true);
     expect(isActionAllowed('finalized', 'join', {}).allowed).toBe(true);

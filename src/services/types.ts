@@ -45,6 +45,16 @@ export interface RoomService {
   getSpots(roomId: string): Promise<MeetingSpot[]>;
   getRouteEstimates(roomId: string): Promise<RouteEstimate[]>;
 
+  /**
+   * Publish live search results as votable spots (max 5, ranked
+   * order). Idempotent per OSM id: re-publishing the same place
+   * updates its row and keeps its id, so votes are never stranded.
+   * Bumps the room's decision_version, which propagates the new
+   * spots to every open page via the room Realtime subscription.
+   * Members only, open rooms only (see the 'publish' action rules).
+   */
+  publishResults(roomId: string, places: PublishPlaceInput[]): Promise<PublishResultsOutcome>;
+
   /** Rank spots: rank 1 = top choice. Replaces the participant's votes. */
   submitVotes(roomId: string, participantId: string, rankedSpotIds: string[]): Promise<Vote[]>;
   getVotes(roomId: string): Promise<Vote[]>;
@@ -70,10 +80,31 @@ export class RoomNotFoundError extends Error {
     this.name = 'RoomNotFoundError';
   }
 }
-
 export class RoomServiceError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RoomServiceError';
   }
+}
+
+/**
+ * One live place to publish as a votable spot. Carries only what the
+ * engine knows: OSM identity, name, category label, coordinates and
+ * an optional address. Rating/price/open-now are deliberately absent
+ * — live places have none, and inventing them would be fake data.
+ */
+export interface PublishPlaceInput {
+  osmId: string;
+  name: string;
+  category: string;
+  lat: number;
+  lng: number;
+  address?: string;
+}
+
+export interface PublishResultsOutcome {
+  /** Upserted spots in submitted (ranked) order. */
+  spots: MeetingSpot[];
+  /** The room's decision_version after the publish bump. */
+  decisionVersion: number;
 }

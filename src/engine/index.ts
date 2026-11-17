@@ -18,4 +18,5 @@ export * from './config';
 export * from './placesClient';
 export * from './proxyPlacesClient';
 export * from './photonClient';
+export * from './publishPlaces';
 export * from './orchestrator';

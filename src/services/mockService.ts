@@ -18,7 +18,7 @@ import type {
   UpdateLocationInput,
   Vote,
 } from '../types';
-import { RoomNotFoundError, RoomServiceError, type RoomService } from './types';
+import { RoomNotFoundError, RoomServiceError, type PublishPlaceInput, type PublishResultsOutcome, type RoomService } from './types';
 import type { SubscriptionStatus } from '../coordination/reconnect';
 
 const STORE_KEY = 'meetsync-demo-rooms-v1';
@@ -569,6 +569,85 @@ export class MockRoomService implements RoomService {
     const detail = await this.getRoomDetail(roomId);
     if (!detail) return [];
     return buildAllRouteEstimates(roomId, detail.participants, detail.spots);
+  }
+
+  async publishResults(roomId: string, places: PublishPlaceInput[]): Promise<PublishResultsOutcome> {
+    await delay(350);
+    const store = this.loadStore();
+    const stored = Object.values(store).find((s) => s.detail.room.id === roomId);
+    if (!stored) throw new RoomServiceError('Room not found.');
+    // Demo identity is the current-participant map for this browser.
+    const current = this.loadCurrent();
+    const caller = stored.detail.participants.find((p) => p.id === current[roomId]);
+    if (!caller) {
+      throw new CoordinationError('NOT_MEMBER', 'Join this room first to publish search results.');
+    }
+    const check = isActionAllowed(stored.detail.room.status, 'publish', {
+      isMember: true,
+      isExpired: isRoomExpired(stored.detail.room),
+    });
+    if (!check.allowed) {
+      throw new CoordinationError(check.code ?? 'UNKNOWN', check.reason ?? 'Publishing is not allowed.');
+    }
+    // Mirror the server validation (lightly — the Edge Function is
+    // the authority in live mode; the mock keeps the contract honest
+    // for tests and demo flows).
+    if (places.length < 1 || places.length > 5) {
+      throw new RoomServiceError('Publish 1 to 5 places at a time.');
+    }
+    for (const place of places) {
+      if (!/^(node|way|relation)\/[0-9]+$/.test(place.osmId)) {
+        throw new RoomServiceError('Each place needs a valid OSM id (node/way/relation + number).');
+      }
+      if (!place.name.trim() || !place.category.trim()) {
+        throw new RoomServiceError('Each place needs a name and a category.');
+      }
+      if (!Number.isFinite(place.lat) || place.lat < -90 || place.lat > 90 ||
+          !Number.isFinite(place.lng) || place.lng < -180 || place.lng > 180) {
+        throw new RoomServiceError('Each place needs valid coordinates.');
+      }
+    }
+    if (new Set(places.map((p) => p.osmId)).size !== places.length) {
+      throw new RoomServiceError('The same place was submitted twice.');
+    }
+    if (stored.detail.spots.length >= 30) {
+      throw new RoomServiceError('This room already has the maximum of 30 spots.');
+    }
+    // Dedup by OSM id: re-publishing updates the row and keeps its
+    // id, so votes referencing it are never stranded.
+    const published: MeetingSpot[] = [];
+    for (const place of places) {
+      const existing = stored.detail.spots.find((s) => s.osmId === place.osmId);
+      if (existing) {
+        existing.name = place.name;
+        existing.category = place.category;
+        existing.address = place.address ?? '';
+        existing.location = { lat: place.lat, lng: place.lng };
+        existing.source = 'live';
+        published.push({ ...existing, location: { ...existing.location } });
+        continue;
+      }
+      const spot: MeetingSpot = {
+        id: newId('spot'),
+        name: place.name,
+        category: place.category,
+        address: place.address ?? '',
+        location: { lat: place.lat, lng: place.lng },
+        // Placeholders: live spots have no rating/price/opening data
+        // and the UI never renders them for source 'live'.
+        rating: 0,
+        priceLevel: 1,
+        openNow: false,
+        source: 'live',
+        osmId: place.osmId,
+      };
+      stored.detail.spots.push(spot);
+      published.push({ ...spot, location: { ...spot.location } });
+    }
+    stored.detail.room.decisionVersion += 1;
+    stored.detail.room.updatedAt = new Date().toISOString();
+    this.saveStore(store);
+    return { spots: published, decisionVersion: stored.detail.room.decisionVersion };
   }
 
   async submitVotes(roomId: string, participantId: string, rankedSpotIds: string[]): Promise<Vote[]> {

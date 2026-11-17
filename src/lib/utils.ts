@@ -30,6 +30,27 @@ export function priceLabel(level: number): string {
 }
 
 /**
+ * True for spots published from a live engine search (source 'live',
+ * migration 0008). Live spots carry NO rating, price-level or
+ * opening-hours data — the database stores placeholders that must
+ * never be rendered. See hasSpotDetails.
+ */
+export function isLiveSpot(spot: { source: string }): boolean {
+  return spot.source === 'live';
+}
+
+/**
+ * Whether a spot carries displayable rating/price/open-now values.
+ * Only seeded ('default') and demo-mode ('mock') spots do — their
+ * values are demo data, labelled "Demo spot" in the UI. Every other
+ * source (including 'live' and any future/unknown value) renders no
+ * rating row at all, so invented data can never leak into the UI.
+ */
+export function hasSpotDetails(spot: { source: string }): boolean {
+  return spot.source === 'mock' || spot.source === 'default';
+}
+
+/**
  * OpenStreetMap directions link, constructed only as an href from
  * coordinates. Clearly labelled as external in the UI. MeetSync uses
  * MapLibre + OpenStreetMap + OSRM; no other maps provider is embedded

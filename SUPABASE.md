@@ -37,6 +37,7 @@ Migrations live in `supabase/migrations/` and must be applied **in filename orde
 | `20251117000005_0005_coordination.sql` | Coordination: `decision_version` + `finalized_at` on rooms, `arrived_at` on participants, `expire_rooms()`, Realtime adds for `votes` + `participant_locations` |
 | `20251117000006_0006_audit_hardening.sql` | Audit hardening: revoke RPC `EXECUTE` on the `SECURITY DEFINER` cleanup/expire functions from `public`/`anon`/`authenticated` (service_role + postgres only); votes validity trigger + unique `(room_id, participant_id, rank)`; atomic `replace_votes()` RPC; expired locations hidden from the member `SELECT` policy |
 | `20251117000007_0007_scooter_mode.sql` | Allow `scooter` in the `route_estimates` mode CHECK (`bike` retained only so pre-existing rows stay valid; the app no longer emits it) |
+| `20251117000008_0008_live_spots.sql` | Live published spots: nullable `candidate_spots.osm_id` + partial unique index on `(room_id, osm_id)` (dedup key for publish upserts; seeded rows keep NULL). No RLS/Realtime changes — provenance reuses the existing `source` column (`live` vs `default`/`mock`), and propagation rides the `decision_version` bump (see the migration header) |
 
 **Option A — Supabase CLI (recommended):**
 
@@ -65,6 +66,7 @@ Functions live in `supabase/functions/`:
 | `join-room` | Verify JWT → normalize code → idempotent participant upsert; expired rooms → 410; finalized rooms joinable for viewing |
 | `update-location` | Verify JWT + membership → upsert own location (expires +2h); expired rooms → 410 |
 | `finalize-meeting` | Verify JWT + host → optimistic-lock finalize (version guard, 409 stale/already-finalized, 410 expired) |
+| `publish-results` | Verify JWT + membership → validate 1–5 live places → upsert `candidate_spots` by `(room_id, osm_id)` (select-then-write; the dedup index is partial so `.upsert(onConflict)` cannot target it) → bump `decision_version` (conditional on open status) → return spots + new version. 30-spot room cap (409 `SPOT_LIMIT`). Requires migration 0008. Deploy with: `supabase functions deploy publish-results` |
 | `places-search` | Verify JWT → structured place search → build Overpass QL server-side → sequential endpoint fallback → parse/dedup/circle-filter → return places. No service-role key, no database access. Required for `VITE_PLACES_PROVIDER=proxy` (see ENGINE.md). Status 2026-11-17: deployed, but currently returns 502 — Overpass is unreachable from Supabase's network too; use `VITE_PLACES_PROVIDER=photon` for live search |
 | `cleanup-expired-locations` | Cron-secret auth → delete expired locations + mark expired rooms + prune old rooms (retention configurable) |
 
@@ -75,6 +77,7 @@ supabase functions deploy create-room
 supabase functions deploy join-room
 supabase functions deploy update-location
 supabase functions deploy finalize-meeting
+supabase functions deploy publish-results
 supabase functions deploy places-search
 supabase functions deploy cleanup-expired-locations
 ```

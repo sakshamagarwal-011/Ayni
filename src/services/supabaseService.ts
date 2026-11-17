@@ -22,7 +22,7 @@ import type {
   UpdateLocationInput,
   Vote,
 } from '../types';
-import { RoomNotFoundError, RoomServiceError, type RoomService } from './types';
+import { RoomNotFoundError, RoomServiceError, type PublishPlaceInput, type PublishResultsOutcome, type RoomService } from './types';
 import type { SubscriptionStatus } from '../coordination/reconnect';
 
 /* Database row shapes (snake_case) — mapped to camelCase app types. */
@@ -78,6 +78,8 @@ interface SpotRow {
   price_level: number;
   open_now: boolean;
   source: string;
+  /** Added in migration 0008; absent on older rows. */
+  osm_id?: string | null;
 }
 
 interface VoteRow {
@@ -132,6 +134,22 @@ function mapVote(row: VoteRow): Vote {
     participantId: row.participant_id,
     spotId: row.spot_id,
     rank: row.rank,
+  };
+}
+
+/** Shared by loadDetail and publishResults: the Edge Function returns full spot rows. */
+function mapSpot(s: SpotRow): MeetingSpot {
+  return {
+    id: s.id,
+    name: s.name,
+    category: s.category,
+    address: s.address,
+    location: { lat: s.lat, lng: s.lng },
+    rating: Number(s.rating),
+    priceLevel: s.price_level as 1 | 2 | 3,
+    openNow: s.open_now,
+    source: s.source,
+    osmId: s.osm_id ?? null,
   };
 }
 
@@ -276,17 +294,7 @@ export class SupabaseRoomService implements RoomService {
           : null,
       };
     });
-    const spots: MeetingSpot[] = ((spotsRes.data ?? []) as SpotRow[]).map((s) => ({
-      id: s.id,
-      name: s.name,
-      category: s.category,
-      address: s.address,
-      location: { lat: s.lat, lng: s.lng },
-      rating: Number(s.rating),
-      priceLevel: s.price_level as 1 | 2 | 3,
-      openNow: s.open_now,
-      source: s.source,
-    }));
+    const spots: MeetingSpot[] = ((spotsRes.data ?? []) as SpotRow[]).map(mapSpot);
     const current = currentUserId
       ? participants.find((p) => p.authUid === currentUserId) ?? null
       : null;
@@ -412,6 +420,28 @@ export class SupabaseRoomService implements RoomService {
     const detail = await this.getRoomDetail(roomId);
     if (!detail) return [];
     return buildAllRouteEstimates(roomId, detail.participants, detail.spots);
+  }
+
+  async publishResults(roomId: string, places: PublishPlaceInput[]): Promise<PublishResultsOutcome> {
+    await this.ensureAuth();
+    const supabase = this.requireClient();
+    const { data, error } = await supabase.functions.invoke('publish-results', {
+      body: { roomId, places },
+    });
+    if (error) {
+      const parsed = await parseEdgeFunctionError(error);
+      throw coordinationErrorFromEdge(parsed, 'Failed to add these places to the vote.');
+    }
+    const payload = data as {
+      spots?: SpotRow[];
+      decisionVersion?: unknown;
+      error?: string;
+      code?: unknown;
+    } | null;
+    if (payload?.error || !Array.isArray(payload?.spots) || typeof payload?.decisionVersion !== 'number') {
+      throw this.payloadError(payload, 'Failed to add these places to the vote.');
+    }
+    return { spots: payload.spots.map(mapSpot), decisionVersion: payload.decisionVersion };
   }
 
   async submitVotes(roomId: string, participantId: string, rankedSpotIds: string[]): Promise<Vote[]> {

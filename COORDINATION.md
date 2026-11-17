@@ -36,6 +36,7 @@ Action rules:
 | `vote` | open status, member, not expired. Closed once finalized. |
 | `finalize` | open status, host, not expired. |
 | `optimize` | open status, member, not expired. Blocked once finalized/expired. |
+| `publish` | same rules as `optimize` (open status, member, not expired). Publishes live search results as votable spots; blocked once finalized/expired. Added in v0.7.0 — see §2.1. |
 | `join` | open status **or finalized** (view-only: a late joiner sees the announcement and can navigate, but cannot vote or change the outcome). Blocked when expired. |
 | `updateLocation` | member, any non-expired status **including finalized** (navigation needs fresh locations). |
 | `arrive` | finalized only, member only. |
@@ -49,6 +50,14 @@ Status advances today are: create → `lobby`, finalize → `finalized` (Edge Fu
 **Validation.** The UI validates a full permutation of the compared set (`validateRanking`); the service validates a non-empty, duplicate-free subset of the room's spots (`validateVoteSubmission`) and verifies membership before deleting. Empty, duplicate, and unknown-spot rankings are rejected with `VOTE_FAILED`.
 
 **Compared set: at most 5 spots** (`selectComparedSpots`). When an engine result is present for the room, its ranked order leads (stored by the Route Discovery panel in `sessionStorage`, validated against the room's decision version on read — a stale order is ignored); otherwise the room's spots are ordered by current group tally. When capped, the UI shows a "Showing top 5" note.
+
+### 2.1 Publishing live results (v0.7.0)
+
+`publishResults(roomId, places)` turns a live search's ranked top 5 into votable `candidate_spots` rows via the `publish-results` Edge Function (migration 0008). Only live results may be published — demo results are the room's spots already. The function upserts by `(room_id, osm_id)` (partial unique index; select-then-write, since the JS client cannot target a partial index with `ON CONFLICT`), so re-publishing keeps row ids stable and votes are never stranded. A room with 30 spots already cannot publish more (409 `SPOT_LIMIT`).
+
+**Version-bump semantics.** Publishing increments `decision_version` by 1 (plain +1, no optimistic lock — concurrent publishes are idempotent and must not 409 each other), conditional on the room still being open, BEFORE the spot writes. The bump is the propagation signal: `candidate_spots` is not in the Realtime publication, so the room-row change is what makes every open page refetch the detail including the new spots. Note the side effect: a publish makes the publisher's own search result read as stale (the version moved) — that is correct, the room did change — and the publish UI switches to its published state rather than offering a blind re-publish.
+
+**Engine order after publish.** The panel saves the RETURNED spot ids + RETURNED decision version with `saveEngineSpotOrder`, so the publisher's Compare page shows the published spots in engine order. Other participants have no stored order and see tally order; with more than 5 spots the compared-set cap may hide new spots behind tally order for them until votes accumulate. That asymmetry is accepted and documented: engine order is a per-browser display hint, never the decision (the group winner decides finalization).
 
 **Tally** (`src/coordination/voting.ts`, pure): per spot — first-choice count, Borda score (rank *r* in a set of *N* earns *N − r* points), average rank, voter count. **Group winner** tie-breaks, in order: most first-choice votes → highest Borda score → lowest average rank → spot name (A–Z). Deterministic; no randomness.
 

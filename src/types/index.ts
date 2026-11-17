@@ -27,6 +27,12 @@ export interface MeetingSpot {
   priceLevel: 1 | 2 | 3;
   openNow: boolean;
   source: string;
+  /**
+   * OSM identity ('node/123', …) for spots published from a live
+   * search (source 'live'). Absent/null for seeded/demo spots.
+   * Added in migration 0008; null for older rows.
+   */
+  osmId?: string | null;
 }
 
 export interface Participant {

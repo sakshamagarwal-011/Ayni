@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import type { MeetingSpot } from '../types';
-import { cn, priceLabel } from '../lib/utils';
+import { cn, hasSpotDetails, isLiveSpot, priceLabel } from '../lib/utils';
 
 export function SpotCard({
   spot,
@@ -49,18 +49,27 @@ export function SpotCard({
           <h3 className="mt-2 text-lg font-semibold text-white">{spot.name}</h3>
           <p className="text-sm text-slate-300">{spot.address}</p>
         </div>
-        <div className="shrink-0 text-right">
-          <p className="text-sm font-semibold text-amber-300">★ {spot.rating.toFixed(1)}</p>
-          <p className="text-xs text-slate-400">{priceLabel(spot.priceLevel)}</p>
-        </div>
+        {hasSpotDetails(spot) && (
+          <div className="shrink-0 text-right">
+            <p className="text-sm font-semibold text-amber-300">★ {spot.rating.toFixed(1)}</p>
+            <p className="text-xs text-slate-400">{priceLabel(spot.priceLevel)}</p>
+          </div>
+        )}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        <span className={cn('rounded-full px-2.5 py-1 font-medium', spot.openNow ? 'bg-emerald-500/15 text-emerald-200' : 'bg-rose-500/15 text-rose-200')}>
-          {spot.openNow ? 'Open now' : 'Closed now'}
-        </span>
+        {hasSpotDetails(spot) && (
+          <span className={cn('rounded-full px-2.5 py-1 font-medium', spot.openNow ? 'bg-emerald-500/15 text-emerald-200' : 'bg-rose-500/15 text-rose-200')}>
+            {spot.openNow ? 'Open now' : 'Closed now'}
+          </span>
+        )}
         {(spot.source === 'mock' || spot.source === 'default') && (
           <span className="rounded-full border border-amber-400/40 bg-amber-500/10 px-2.5 py-1 font-medium text-amber-200">
             Demo spot
+          </span>
+        )}
+        {isLiveSpot(spot) && (
+          <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-2.5 py-1 font-medium text-sky-200">
+            Live place
           </span>
         )}
         {votes !== undefined && (

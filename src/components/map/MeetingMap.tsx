@@ -9,7 +9,7 @@ import {
   type MapMouseEvent,
 } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { formatDistance, formatDuration, initials } from '../../lib/utils';
+import { formatDistance, formatDuration, hasSpotDetails, initials } from '../../lib/utils';
 import type { Coordinates, MeetingSpot, Participant } from '../../types';
 import { midpointOf, progressGeometry, simplifyGeometry } from '../../engine/animation';
 import { getMapConfig } from '../../map/config';
@@ -568,7 +568,9 @@ export function MeetingMap({
       }
       const popup = new Popup({ closeButton: false, closeOnClick: true, offset: 20, maxWidth: '260px' }).setHTML(
         `<div><strong>${escapeHtml(s.name)}</strong><br/>${escapeHtml(s.address)}<br/>` +
-          `<span>${escapeHtml(s.category)} · ★ ${s.rating.toFixed(1)} · ${s.openNow ? 'Open now' : 'Closed now'}</span></div>`,
+          // Live places carry no rating/opening data — show the
+          // category alone rather than invented values.
+          `<span>${escapeHtml(s.category)}${hasSpotDetails(s) ? ` · ★ ${s.rating.toFixed(1)} · ${s.openNow ? 'Open now' : 'Closed now'}` : ''}</span></div>`,
       );
       const marker = new Marker({ element: el, anchor: 'bottom' })
         .setLngLat([s.location.lng, s.location.lat])

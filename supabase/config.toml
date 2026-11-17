@@ -12,7 +12,7 @@
 # Auth is NOT disabled: the function itself requires the
 # `x-cron-secret` header to match the CLEANUP_SECRET Edge Function
 # secret (constant-time comparison), and rejects every request
-# without it. Do NOT remove that check. The other four functions keep
+# without it. Do NOT remove that check. All other functions keep
 # the default verify_jwt = true (user JWT required).
 [functions.cleanup-expired-locations]
 verify_jwt = false

@@ -327,6 +327,54 @@ results. `VITE_OPTIMIZATION_ENABLED=false`, `places=off`, or
 `routing=off` disables the search entirely with an explanatory
 message. Defaults (no env vars) are demo: zero external calls.
 
+## Publishing live results as votable spots (v0.7.0)
+
+Live results are informational until published: voting and
+finalizing operate on `candidate_spots` rows, and engine candidates
+are not rows. After a **live** search (every ranked candidate from
+`overpass`/`photon` — never `mock`), the Route Discovery panel offers
+"Add these places to the vote". Publishing sends the ranked top 5 to
+the `publish-results` Edge Function, which upserts them as
+`candidate_spots` rows (`source='live'`, `osm_id` set) and returns
+the rows plus the room's new `decision_version`.
+
+- **Dedup by OSM id:** the partial unique index on
+  `(room_id, osm_id)` (migration 0008) makes re-publishing the same
+  place update its row instead of duplicating it — votes reference
+  spot ids, so ids must stay stable. The upsert is select-then-write
+  (not `.upsert(onConflict)`): Postgres only accepts a partial index
+  as the `ON CONFLICT` arbiter with a matching `WHERE` predicate,
+  which the JS client cannot express.
+- **Why the version bumps:** `candidate_spots` is deliberately NOT
+  in the Realtime publication. The `decision_version` increment on
+  `meeting_rooms` (which IS subscribed) makes every open page refetch
+  the full room detail — including the new spots — so the whole room
+  sees published places live. The bump is conditional on the room
+  still being open and happens BEFORE the spot writes, so a
+  concurrent finalize fails the publish cleanly instead of adding
+  spots to a finalized room.
+- **30-spot cap:** a room with 30 spots already cannot publish more
+  (409 `SPOT_LIMIT`). Re-publishing existing places never grows the
+  count. The cap is a spam/abuse guard, enforced server-side (and
+  mirrored in the mock service).
+- **No invented data:** the payload carries only OSM id, name,
+  category label, coordinates and address. Rating/price/open-now are
+  never accepted from the client; the server stores placeholders the
+  frontend never renders for `source='live'` rows (SpotCard shows a
+  "Live place" badge and no rating row; the map popup shows the
+  category alone). Seeded spots keep `source='default'` and the
+  "Demo spot" badge.
+- **Engine order after publish:** the panel saves the RETURNED spot
+  ids + RETURNED decision version via `saveEngineSpotOrder`, so the
+  publisher's Compare page shows the published spots in engine order.
+  Other participants see tally order (their browsers have no stored
+  order), and the compared set is still capped at 5 — see
+  COORDINATION.md.
+- **UI idempotency:** after a successful publish the button becomes
+  a "Published ✓ — view on Compare & vote" link. A new search
+  re-enables publishing for the new result set. The server-side
+  upsert makes repeat publishes safe regardless.
+
 ## Validation, consent, and privacy (Step 1)
 
 - **Membership:** the runner must be a room member and every origin
@@ -345,7 +393,7 @@ message. Defaults (no env vars) are demo: zero external calls.
   finalized/expired meeting cannot start a new search.
 - **Meeting time:** valid ISO, not more than 24h in the past.
 - **Constraints:** `maxTravelMinutes` 5–240; `maxCandidates` 1–20.
-- **Privacy:** in live mode, Overpass receives search circles
+- **Privacy:** in live mode, the configured places provider (Photon by default, or Overpass/the proxy) receives search circles
   (centre + radius + category) and OSRM receives route endpoint
   coordinates. No names, room ids, or auth tokens are sent to either
   endpoint. Coordinates sent to public servers are visible to their

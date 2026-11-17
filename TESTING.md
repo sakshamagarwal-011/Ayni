@@ -380,6 +380,20 @@ Steps:
 
 - Pass: counts within budget; repeat runs are cached. Record the observed counts.
 
+### 7.9 Publish live results as votable spots (v0.7.0; requires migration 0008 + deployed `publish-results`)
+
+Prerequisite: a live search (Photon/Overpass/proxy + OSRM) in a real room with two browsers (reuse the §4/§8 setup: A = host, B = guest, separate profiles).
+
+1. In A, run a live search and confirm the "Add these places to the vote" button appears under the results with the "Everyone in the room will see them on Compare & vote." note. In Demo mode (or after a demo search), confirm the button does NOT appear.
+2. In A, click the button. Confirm the success note ("Added to the vote — N places now on Compare & vote.") and the "Published ✓ — view on Compare & vote" link, and that the button cannot be clicked again for the same result set.
+3. In B (no reload), open Compare & vote: confirm the published places appear as votable spots with the "Live place" badge, NO rating row, NO "Open now"/"Closed now" badge, and NO "Demo spot" badge. Confirm the 3 seeded spots still show "Demo spot" with their rating rows.
+4. In B, rank a published live spot #1 and save. In A, confirm the tally updates live.
+5. In A, finalize the live spot (host). In both browsers, confirm the finalized announcement names the live spot, and the Final Navigation page shows it with no invented rating/price/open-now.
+6. In A, re-run the same search and publish again: confirm no duplicate spots appear (same rows, same ids — check the spot count on Compare stays the same) and existing votes still reference the same spots.
+7. (Negative) In a finalized room, confirm the publish button is disabled/absent with the finalized explanation, and a direct `publish-results` call with a finalized room returns 409.
+
+- Pass: publish → live visibility in the second browser → vote → finalize → navigate, with honest labelling throughout and no duplicates on re-publish. Record the room code, browsers, and pass/fail per step.
+
 ### Recording the Phase 4 result
 
 When §7 has been run, update the status table at the top of this file with the date, browsers/devices used, provider settings tested, observed request counts (§7.8), and pass/fail per item (7.1–7.8). Until then, live engine/animation behaviour remains **unverified**, even though unit tests, mocked integration tests, the build, and the code review are complete. Do not claim live verification passed until §7 is run and recorded.
@@ -467,10 +481,21 @@ Covers the Phase 5 coordination layer: voting Realtime, host/non-host finalizati
 
 - Pass: stale banner appears on room change; searches are blocked once finalized/expired; finalize never consumes a stale result.
 
+### 8.10 Publish propagation + engine order (v0.7.0; requires migration 0008 + deployed `publish-results`)
+
+Companion to §7.9 (which covers the publish → vote → finalize flow end to end). This section covers the coordination mechanics:
+
+1. In A, publish a live search. In B (no reload), confirm the new spots appear on Compare & vote within a couple of seconds — propagation rides the `decision_version` bump on the room row, not a spots subscription.
+2. In A, open Compare & vote immediately after publishing: confirm the published spots lead in engine order (the panel saved the returned ids + returned version). In B, confirm the same spots appear in tally order (no stored engine order in that browser) — the asymmetry is expected and documented.
+3. In A, confirm the just-published search now shows the stale banner (the version moved) while the published state ("Published ✓ — view on Compare & vote") stays visible. A new search re-enables publishing.
+4. (Optional, via SQL) Confirm `decision_version` incremented by exactly 1 for the publish, the new rows have `source = 'live'` and non-null `osm_id`, and re-publishing the same places did not create duplicate rows.
+
+- Pass: live propagation without reload; engine order for the publisher, tally order for others; stale banner after own publish; version +1 per publish; no duplicate rows.
+
 ### Pass criteria (all of §8)
 
-- 8.2–8.9 each pass as described; the same destination is visible in both browsers on all four room pages; no Google URLs; no other participant's coordinates in links/URLs; no blank/spinner-only states during disconnects.
-- Record: date, browsers/devices, Supabase project ref (not keys), migration/function deploy confirmation, and pass/fail per item (8.2–8.9).
+- 8.2–8.10 each pass as described; the same destination is visible in both browsers on all four room pages; no Google URLs; no other participant's coordinates in links/URLs; no blank/spinner-only states during disconnects.
+- Record: date, browsers/devices, Supabase project ref (not keys), migration/function deploy confirmation, and pass/fail per item (8.2–8.10).
 
 ### Troubleshooting
 
