@@ -28,7 +28,7 @@ Covers: invite-code format/normalization, title/display-name/lat/lng validation,
 
 The `ErrorBoundary` around the page outlet (`src/components/ErrorBoundary.tsx`, wired in `Layout.tsx`) is unit-tested in `tests/unit/errorBoundary.test.ts` (jsdom render; see the file header for why server rendering cannot exercise a boundary): a throwing child renders the fallback — "Something went wrong" + Reload the page / Back to home — instead of a blank render, a healthy child renders normally, the error state clears when the route key changes (and stays on the fallback when it doesn't), and `getDerivedStateFromError` returns the error state. Coverage: render-time crashes in the page tree, including lazy chunk-load failures (the Reload button fixes those). It does NOT catch event-handler or async errors — those keep their existing handling (service fallbacks, reconnect, retry UI). No `window.onerror` / `unhandledrejection` handlers are added, and the caught error is logged to `console.error` only (nothing leaves the device).
 
-Live regression expectation (NOT yet run): on the deployed build, every page loads normally with no fallback shown and no console errors. A real crash-trigger test needs a fault-injection build and was NOT run live — do not claim the fallback itself was verified in a browser until that is done.
+Live regression VERIFIED 2026-11-18 (~00:58 IST, bundle `assets/index-ByoBjas8.js`): all 7 pages (Landing, Create, Join, room KVCD2N Lobby/Routes/Compare/Navigate) rendered their normal content with no fallback shown and no visible errors. A real crash-trigger test needs a fault-injection build and was NOT run live — do not claim the fallback itself was verified in a browser until that is done.
 
 ## 2. Demo-mode manual checklist (no env vars)
 
