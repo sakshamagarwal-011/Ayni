@@ -80,6 +80,8 @@ interface SpotRow {
   source: string;
   /** Added in migration 0008; absent on older rows. */
   osm_id?: string | null;
+  /** Added in migration 0009; absent on older rows. */
+  published_rank?: number | null;
 }
 
 interface VoteRow {
@@ -150,6 +152,7 @@ function mapSpot(s: SpotRow): MeetingSpot {
     openNow: s.open_now,
     source: s.source,
     osmId: s.osm_id ?? null,
+    publishedRank: s.published_rank ?? null,
   };
 }
 

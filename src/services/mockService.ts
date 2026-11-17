@@ -614,9 +614,13 @@ export class MockRoomService implements RoomService {
       throw new RoomServiceError('This room already has the maximum of 30 spots.');
     }
     // Dedup by OSM id: re-publishing updates the row and keeps its
-    // id, so votes referencing it are never stranded.
+    // id, so votes referencing it are never stranded. Rank mirrors
+    // the server (migration 0009): 1-based position in the submitted
+    // order, cleared on every other spot so a re-publish supersedes
+    // the previous batch.
     const published: MeetingSpot[] = [];
-    for (const place of places) {
+    for (const [index, place] of places.entries()) {
+      const publishedRank = index + 1;
       const existing = stored.detail.spots.find((s) => s.osmId === place.osmId);
       if (existing) {
         existing.name = place.name;
@@ -624,6 +628,7 @@ export class MockRoomService implements RoomService {
         existing.address = place.address ?? '';
         existing.location = { lat: place.lat, lng: place.lng };
         existing.source = 'live';
+        existing.publishedRank = publishedRank;
         published.push({ ...existing, location: { ...existing.location } });
         continue;
       }
@@ -640,9 +645,14 @@ export class MockRoomService implements RoomService {
         openNow: false,
         source: 'live',
         osmId: place.osmId,
+        publishedRank,
       };
       stored.detail.spots.push(spot);
       published.push({ ...spot, location: { ...spot.location } });
+    }
+    const publishedIds = new Set(published.map((s) => s.id));
+    for (const spot of stored.detail.spots) {
+      if (!publishedIds.has(spot.id)) spot.publishedRank = null;
     }
     stored.detail.room.decisionVersion += 1;
     stored.detail.room.updatedAt = new Date().toISOString();

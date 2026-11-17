@@ -23,6 +23,7 @@ function spot(source: string): MeetingSpot {
     priceLevel: 2,
     openNow: true,
     source,
+    publishedRank: null,
   };
 }
 
@@ -208,6 +209,36 @@ describe('mock-service publishResults', () => {
     expect(second.spots[0].name).toBe('New Name');
     const spots = await service.getSpots(roomId);
     expect(spots).toHaveLength(4); // 3 seeded + 1 published (no duplicate)
+  });
+
+  it('sets publishedRank 1..N in submitted order and null on seeded spots', async () => {
+    const { service, roomId } = await setupRoom();
+    const outcome = await service.publishResults(roomId, [place('node/1'), place('way/2'), place('node/3')]);
+    expect(outcome.spots.map((s) => s.publishedRank)).toEqual([1, 2, 3]);
+    const spots = await service.getSpots(roomId);
+    expect(spots.filter((s) => s.source !== 'live').map((s) => s.publishedRank)).toEqual([null, null, null]);
+    expect(spots.filter((s) => s.source === 'live').map((s) => s.publishedRank)).toEqual([1, 2, 3]);
+  });
+
+  it('supersedes: a re-publish clears ranks on the previous batch', async () => {
+    const { service, roomId } = await setupRoom();
+    await service.publishResults(roomId, [place('node/1'), place('way/2')]);
+    const second = await service.publishResults(roomId, [place('node/9'), place('node/8')]);
+    expect(second.spots.map((s) => s.publishedRank)).toEqual([1, 2]);
+    const spots = await service.getSpots(roomId);
+    const byOsm = new Map(spots.map((s) => [s.osmId, s.publishedRank]));
+    expect(byOsm.get('node/1')).toBeNull();
+    expect(byOsm.get('way/2')).toBeNull();
+    expect(byOsm.get('node/9')).toBe(1);
+    expect(byOsm.get('node/8')).toBe(2);
+  });
+
+  it('re-publishing the same place keeps its id and refreshes its rank', async () => {
+    const { service, roomId } = await setupRoom();
+    const first = await service.publishResults(roomId, [place('node/1'), place('way/2')]);
+    const second = await service.publishResults(roomId, [place('way/2'), place('node/1')]);
+    expect(second.spots.map((s) => s.id)).toEqual([first.spots[1].id, first.spots[0].id]);
+    expect(second.spots.map((s) => s.publishedRank)).toEqual([1, 2]);
   });
 
   it('published spots are votable: a ranking over them saves', async () => {

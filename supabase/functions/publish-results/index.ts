@@ -44,6 +44,15 @@
 // page refetches the full detail (including spots) on the room change
 // event. See migration 0008.
 //
+// Shared published rank (migration 0009): each published row gets
+// published_rank = its 1-based position in the submitted order, and
+// every OTHER spot in the room has its rank cleared, so a re-publish
+// supersedes the previous batch. The rank is what makes the
+// published ordering shared and server-authoritative: every
+// participant's Compare page leads with the latest batch in rank
+// order (the publisher's sessionStorage engine order still takes
+// precedence when present, as a display hint only).
+//
 // Errors are typed JSON { error, code }; no stack traces, no DB
 // internals in responses.
 import { getServiceClient, getUserIdFromRequest, readJsonBody } from '../_shared/auth.ts';
@@ -171,7 +180,7 @@ Deno.serve(async (req: Request) => {
     // source='live' rows (see migration 0008). Never accept them
     // from the client.
     const published: Record<string, unknown>[] = [];
-    for (const place of places) {
+    for (const [index, place] of places.entries()) {
       const fields = {
         name: place.name,
         category: place.category,
@@ -179,6 +188,10 @@ Deno.serve(async (req: Request) => {
         lat: place.lat,
         lng: place.lng,
         source: 'live',
+        // 1-based position in the submitted order (migration 0009).
+        // Folded into `fields` so the update, insert, and 23505 race
+        // paths all set it identically.
+        published_rank: index + 1,
       };
       const existing = existingByOsmId.get(place.osmId);
       if (existing) {
@@ -237,6 +250,25 @@ Deno.serve(async (req: Request) => {
         return jsonError('Failed to publish places.', 500);
       }
       published.push(updated as Record<string, unknown>);
+    }
+
+    // Supersede: clear the rank on every OTHER spot in the room, so
+    // the previous batch falls back to tally order and only this
+    // batch leads the compared set. The ids come from rows this
+    // function just selected/inserted (UUIDs), so the `in` list is
+    // safe to build. A failure here is fatal like the mid-loop
+    // failures above: re-publishing is idempotent and completes it.
+    const publishedIds = published
+      .map((row) => row['id'])
+      .filter((id): id is string => typeof id === 'string');
+    const { error: clearError } = await service
+      .from('candidate_spots')
+      .update({ published_rank: null })
+      .eq('room_id', roomId)
+      .not('id', 'in', `(${publishedIds.join(',')})`);
+    if (clearError) {
+      console.error('publish-results: rank clear failed', clearError.message);
+      return jsonError('Failed to publish places.', 500);
     }
 
     return jsonResponse({ spots: published, decisionVersion: newVersion });

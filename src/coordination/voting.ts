@@ -164,12 +164,18 @@ export interface ComparedSpots {
 }
 
 /**
- * The compared set: at most 5 spots. When an engine result is present
- * (ordered spot ids from the last optimization search, stored by the
- * Route Discovery panel), matching room spots lead in engine order and
- * the remainder follow by group tally. Otherwise the room's spots are
- * ordered by group tally. Engine ordering is a display hint only — it
- * never decides finalization (the group winner does).
+ * The compared set: at most 5 spots. Ordering precedence:
+ * 1. The sessionStorage engine order (the publisher's own view, or
+ *    demo mode), when present and matching room spots: matching
+ *    spots lead in engine order, remainder follow by group tally.
+ * 2. The SHARED published order: spots with a non-null
+ *    `publishedRank` (set server-side by publish-results, migration
+ *    0009) lead in rank order, so every participant sees the latest
+ *    published batch first even without an engine order; the
+ *    remainder follow by group tally.
+ * 3. Group tally order when neither exists.
+ * Engine/published ordering is a display hint only — it never
+ * decides finalization (the group winner does).
  */
 export function selectComparedSpots(
   spots: MeetingSpot[],
@@ -188,7 +194,19 @@ export function selectComparedSpots(
     const rest = byTally.filter((s) => !order.includes(s.id));
     ordered = [...inEngineOrder, ...rest];
   } else {
-    ordered = byTally;
+    // Shared published order: the latest batch leads in rank order.
+    // Array.sort is stable, so duplicate ranks (not expected from
+    // the server) keep input order deterministically.
+    const published = spots
+      .filter((s) => s.publishedRank != null)
+      .sort((a, b) => (a.publishedRank ?? 0) - (b.publishedRank ?? 0));
+    if (published.length > 0) {
+      const publishedIds = new Set(published.map((s) => s.id));
+      const rest = byTally.filter((s) => !publishedIds.has(s.id));
+      ordered = [...published, ...rest];
+    } else {
+      ordered = byTally;
+    }
   }
   return { compared: ordered.slice(0, COMPARED_SPOTS_LIMIT), capped: spots.length > COMPARED_SPOTS_LIMIT, total: spots.length };
 }

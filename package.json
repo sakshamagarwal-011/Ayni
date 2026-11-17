@@ -35,5 +35,5 @@
     "test:maps": "vitest run tests/unit/routing.test.ts tests/unit/mapConfig.test.ts tests/unit/geo.test.ts tests/unit/style.test.ts tests/unit/geolocation.test.ts"
   },
   "type": "module",
-  "version": "0.7.0"
+  "version": "0.7.1"
 }

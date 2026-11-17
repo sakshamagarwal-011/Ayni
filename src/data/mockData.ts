@@ -53,6 +53,7 @@ export const MOCK_SPOTS: MeetingSpot[] = [
     priceLevel: 2,
     openNow: true,
     source: 'mock',
+    publishedRank: null,
   },
   {
     id: 'spot-violet-gardens',
@@ -64,6 +65,7 @@ export const MOCK_SPOTS: MeetingSpot[] = [
     priceLevel: 3,
     openNow: true,
     source: 'mock',
+    publishedRank: null,
   },
   {
     id: 'spot-central-brew',
@@ -75,6 +77,7 @@ export const MOCK_SPOTS: MeetingSpot[] = [
     priceLevel: 2,
     openNow: false,
     source: 'mock',
+    publishedRank: null,
   },
 ];
 

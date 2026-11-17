@@ -33,6 +33,15 @@ export interface MeetingSpot {
    * Added in migration 0008; null for older rows.
    */
   osmId?: string | null;
+  /**
+   * Rank (1..5) of this spot in the room's LATEST published batch,
+   * or null when the spot is not in the latest batch. Owned by the
+   * publish-results Edge Function; a re-publish supersedes the
+   * previous batch. Drives the shared compared-set ordering (see
+   * selectComparedSpots). Added in migration 0009; null for older
+   * rows and for seeded/demo spots.
+   */
+  publishedRank: number | null;
 }
 
 export interface Participant {

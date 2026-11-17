@@ -18,7 +18,7 @@ function vote(participantId: string, spotId: string, rank: number): Vote {
   return { id: `${participantId}-${spotId}`, roomId: 'room-1', participantId, spotId, rank };
 }
 
-function spot(id: string, name: string): MeetingSpot {
+function spot(id: string, name: string, publishedRank: number | null = null): MeetingSpot {
   return {
     id,
     name,
@@ -29,6 +29,7 @@ function spot(id: string, name: string): MeetingSpot {
     priceLevel: 2,
     openNow: true,
     source: 'mock',
+    publishedRank,
   };
 }
 
@@ -158,6 +159,91 @@ describe('selectComparedSpots / top-5 cap', () => {
     const { compared, capped } = selectComparedSpots(spots.slice(0, 3), []);
     expect(compared).toHaveLength(3);
     expect(capped).toBe(false);
+  });
+});
+
+describe('selectComparedSpots / shared published order', () => {
+  // The live defect (v0.7.0): 3 seeded spots (created first, null
+  // rank) + 5 published spots. A viewer with NO engine order must
+  // see all 5 published spots, in rank order — not 3 seeded + 2 live.
+  function roomWithBatch(): MeetingSpot[] {
+    return [
+      spot('seed-1', 'Seed One'),
+      spot('seed-2', 'Seed Two'),
+      spot('seed-3', 'Seed Three'),
+      spot('live-1', 'Live One', 1),
+      spot('live-2', 'Live Two', 2),
+      spot('live-3', 'Live Three', 3),
+      spot('live-4', 'Live Four', 4),
+      spot('live-5', 'Live Five', 5),
+    ];
+  }
+
+  it('leads with the published batch in rank order for a viewer with no engine order', () => {
+    const { compared, capped, total } = selectComparedSpots(roomWithBatch(), []);
+    expect(compared.map((s) => s.id)).toEqual(['live-1', 'live-2', 'live-3', 'live-4', 'live-5']);
+    expect(capped).toBe(true);
+    expect(total).toBe(8);
+  });
+
+  it('orders the remainder by group tally after the published batch', () => {
+    const spots = [
+      spot('seed-1', 'Seed One'),
+      spot('seed-2', 'Seed Two'),
+      spot('seed-3', 'Seed Three'),
+      spot('live-1', 'Live One', 1),
+      spot('live-2', 'Live Two', 2),
+    ];
+    // One vote for a seeded spot: it must lead the remainder even
+    // though the published batch leads overall.
+    const votes = [vote('p1', 'seed-3', 1), vote('p1', 'seed-1', 2)];
+    const { compared } = selectComparedSpots(spots, votes);
+    expect(compared.map((s) => s.id)).toEqual(['live-1', 'live-2', 'seed-3', 'seed-1', 'seed-2']);
+  });
+
+  it('keeps engine order precedence when present, even over published ranks', () => {
+    const { compared } = selectComparedSpots(roomWithBatch(), [], [
+      'seed-2',
+      'live-5',
+      'seed-1',
+      'live-1',
+      'live-2',
+      'live-3',
+      'live-4',
+      'seed-3',
+    ]);
+    expect(compared.map((s) => s.id)).toEqual(['seed-2', 'live-5', 'seed-1', 'live-1', 'live-2']);
+  });
+
+  it('behaves exactly as before when all ranks are null', () => {
+    const spots = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => spot(id, `Spot ${id.toUpperCase()}`));
+    const votes = [vote('p1', 'g', 1), vote('p1', 'a', 2), vote('p2', 'g', 1)];
+    const { compared } = selectComparedSpots(spots, votes);
+    // Same as the pre-0009 tally order: voted 'g' first, then the
+    // rest in input order (no published batch to lead).
+    expect(compared.map((s) => s.id)).toEqual(['g', 'a', 'b', 'c', 'd']);
+  });
+
+  it('superseded batch spots fall back to tally order once their ranks are cleared', () => {
+    // Simulate the server state after a re-publish: batch A spots
+    // have null ranks (cleared), batch B spots carry 1..2.
+    const spots = [
+      spot('seed-1', 'Seed One'),
+      spot('old-a', 'Old A'),
+      spot('old-b', 'Old B'),
+      spot('new-1', 'New One', 1),
+      spot('new-2', 'New Two', 2),
+    ];
+    const votes = [vote('p1', 'old-b', 1)];
+    const { compared } = selectComparedSpots(spots, votes);
+    // New batch leads; the voted old-batch spot leads the remainder.
+    expect(compared.map((s) => s.id)).toEqual(['new-1', 'new-2', 'old-b', 'seed-1', 'old-a']);
+  });
+
+  it('ignores a published rank on a spot the engine order already placed (engine order wins)', () => {
+    const spots = [spot('a', 'A', 1), spot('b', 'B', 2), spot('c', 'C')];
+    const { compared } = selectComparedSpots(spots, [], ['c', 'b', 'a']);
+    expect(compared.map((s) => s.id)).toEqual(['c', 'b', 'a']);
   });
 });
 
