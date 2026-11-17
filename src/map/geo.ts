@@ -1,7 +1,7 @@
 import bbox from '@turf/bbox';
 import center from '@turf/center';
 import { featureCollection, point } from '@turf/helpers';
-import type { Coordinates, ParticipantLocation } from '../types';
+import type { Coordinates, MeetingSpot, Participant, ParticipantLocation } from '../types';
 
 /**
  * Geospatial helpers built on Turf.js. Pure functions — no map, window,
@@ -47,6 +47,36 @@ export function centreForPoints(coords: Coordinates[]): Coordinates | null {
   const c = center(toPoints(coords));
   const [lng, lat] = c.geometry.coordinates;
   return { lat, lng };
+}
+
+/**
+ * Points the map should frame when the selection changes: every
+ * participant's location plus ONLY the selected spot's location, so a
+ * far-away unselected spot (e.g. a demo venue in another city) never
+ * drags the viewport across the country. When nothing is selected, or
+ * the id matches no spot, frame everything: all participant locations
+ * + all spot locations. The manual pin location is always included
+ * when present. Pure — unit-testable. (The "Fit all" control does NOT
+ * use this: it always frames everything — see MeetingMap.)
+ */
+export function fitPointsForSelection(
+  participants: Participant[],
+  spots: MeetingSpot[],
+  selectedSpotId: string | null | undefined,
+  pinLocation?: Coordinates | null,
+): Coordinates[] {
+  const pts: Coordinates[] = [];
+  for (const p of participants) {
+    if (p.location) pts.push({ lat: p.location.lat, lng: p.location.lng });
+  }
+  const selected = selectedSpotId ? spots.find((s) => s.id === selectedSpotId) : undefined;
+  if (selected) {
+    pts.push(selected.location);
+  } else {
+    for (const s of spots) pts.push(s.location);
+  }
+  if (pinLocation) pts.push(pinLocation);
+  return pts;
 }
 
 /** Straight-line geometry between two points, as [lng, lat] pairs (GeoJSON order). */

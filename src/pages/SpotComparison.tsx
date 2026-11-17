@@ -323,7 +323,7 @@ export function SpotComparison() {
       )}
 
       {orderedSpots.length === 0 ? (
-        <EmptyState title="No spots to compare" description="Reload to check for spots again.">
+        <EmptyState title="No spots to compare" description="No places have been added to the vote yet. Run a search on Route Discovery and add the results to the vote — they will appear here for everyone to rank.">
           <button type="button" onClick={reload} className="btn-secondary !px-4 !py-2 text-xs">Reload</button>
         </EmptyState>
       ) : (

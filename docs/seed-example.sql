@@ -3,8 +3,10 @@
 -- This snippet shows how a developer could seed ONE demo room directly in
 -- SQL for local experimentation. Do NOT run it in production, and do NOT
 -- move it into supabase/migrations/ (migration 0004 documents the
--- seed-free rule). Prefer the in-app Demo mode or the create-room Edge
--- Function, which seeds the same three spots server-side.
+-- seed-free rule). Prefer the in-app Demo mode, which seeds sample
+-- spots client-side. The create-room Edge Function no longer seeds
+-- spots (v0.7.3): new live rooms start empty and spots arrive via
+-- publish-results.
 --
 -- Replace <ROOM_UUID> / <AUTH_UID> with real UUIDs before running.
 -- ---------------------------------------------------------------------------

@@ -255,7 +255,7 @@ export function RouteDiscovery() {
       {showEstimatesSkeleton && <PageSkeleton title="Route estimates" />}
 
       {!estimatesLoading && detail.spots.length === 0 && (
-        <EmptyState title="No meeting spots yet" description="Spots are added when the room is created. Reload to check again.">
+        <EmptyState title="No meeting spots yet" description="No places have been added to this room yet. Run a search above to find real meeting points, then add them to the vote — published places appear here and on Compare & vote.">
           <button type="button" onClick={reload} className="btn-secondary !px-4 !py-2 text-xs">Reload</button>
         </EmptyState>
       )}

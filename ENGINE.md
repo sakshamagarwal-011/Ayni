@@ -362,14 +362,15 @@ the rows plus the room's new `decision_version`.
   never accepted from the client; the server stores placeholders the
   frontend never renders for `source='live'` rows (SpotCard shows a
   "Live place" badge and no rating row; the map popup shows the
-  category alone). Seeded spots keep `source='default'` and the
-  "Demo spot" badge.
+  category alone). Seeded spots in rooms created before v0.7.3 keep
+  `source='default'` and the "Demo spot" badge; new rooms start empty
+  and have no seeded spots.
 - **Engine order after publish:** the panel saves the RETURNED spot
   ids + RETURNED decision version via `saveEngineSpotOrder`, so the
   publisher's Compare page shows the published spots in engine order.
-  Other participants see tally order (their browsers have no stored
-  order), and the compared set is still capped at 5 — see
-  COORDINATION.md.
+  Other participants see the same order via the shared
+  `published_rank` on the spot rows (v0.7.1), not tally order, and
+  the compared set is still capped at 5 — see COORDINATION.md.
 - **UI idempotency:** after a successful publish the button becomes
   a "Published ✓ — view on Compare & vote" link. A new search
   re-enables publishing for the new result set. The server-side

@@ -76,10 +76,12 @@ If tests fail with “relation does not exist”, migrations have not been appli
 
 ### Steps
 
+> Since v0.7.3, new live rooms start with ZERO spots (no seeded demo spots). Steps 4–6 below therefore need a search + publish first: in Browser A, run a live search on Routes and click "Add these places to the vote" before checking Routes/Compare/finalize. (The 2026-11-17 verification record below ran against rooms with seeded spots and stays as history.)
+
 1. **Browser A (host):** Create → title “Two-browser test”, display name “Host A”, pick any area → Create. Note the invite code + link from the Lobby.
 2. **Browser B (guest):** Open the invite link (paste the full `/join/<CODE>` URL). Enter display name “Guest B”, pick a different area → Join.
 3. **Lobby Realtime:** In Browser A, without reloading, Guest B should appear in the participant list within a few seconds, and the lobby status should show “Live”. In Browser B, toggle Ready on/off; Browser A should see Guest B's readiness change live. In Browser A, toggle Ready; Browser B should see it.
-4. **Routes:** In both browsers, go to Routes. Both should see the same 3 spots and estimates for both participants.
+4. **Routes:** In Browser A, run a live search and publish the results. In both browsers, go to Routes. Both should see the same published spots and estimates for both participants. Before publishing, Routes shows the "No meeting spots yet" empty state with the working search panel (not an error).
 5. **Compare:** In Browser B, reorder + save a ranking. In Browser A, reload Compare — the vote count should reflect Guest B's vote.
 6. **Finalize (host-only):** In Browser B, attempt Finalize → expect an error (“Only the host can finalize”). In Browser A, finalize → both browsers' Navigate pages (navigate there in B) show the same final spot.
 7. **Navigate:** Both browsers see per-friend ETAs for the final spot.
@@ -387,16 +389,18 @@ Prerequisite: a live search (Photon/Overpass/proxy + OSRM) in a real room with t
 
 1. In A, run a live search and confirm the "Add these places to the vote" button appears under the results with the "Everyone in the room will see them on Compare & vote." note. In Demo mode (or after a demo search), confirm the button does NOT appear.
 2. In A, click the button. Confirm the success note ("Added to the vote — N places now on Compare & vote.") and the "Published ✓ — view on Compare & vote" link, and that the button cannot be clicked again for the same result set.
-3. In B (no reload), open Compare & vote: confirm the published places appear as votable spots with the "Live place" badge, NO rating row, NO "Open now"/"Closed now" badge, and NO "Demo spot" badge. Confirm the 3 seeded spots still show "Demo spot" with their rating rows.
-4. **Shared published order (v0.7.1):** with 8 spots in the room (3 seeded + 5 published) and NO search ever run in B (no engine order in that browser), confirm B's Compare page shows ALL 5 published spots, in the published ranked order, without a reload — the seeded spots must NOT crowd them out of the top-5 cap. Reload B and confirm the same order persists (server-authoritative, not session state).
+3. In B (no reload), open Compare & vote: confirm the published places appear as votable spots with the "Live place" badge, NO rating row, NO "Open now"/"Closed now" badge, and NO "Demo spot" badge. (A fresh room has no seeded spots since v0.7.3; the "Demo spot" labelling check applies to Demo mode and rooms created before v0.7.3.)
+4. **Shared published order (v0.7.1):** with 5 published spots in a fresh room (no seeded spots since v0.7.3) and NO search ever run in B (no engine order in that browser), confirm B's Compare page shows ALL 5 published spots, in the published ranked order, without a reload. Reload B and confirm the same order persists (server-authoritative, not session state).
 5. In B, rank a published live spot #1 and save. In A, confirm the tally updates live.
 6. In A, finalize the live spot (host). In both browsers, confirm the finalized announcement names the live spot, and the Final Navigation page shows it with no invented rating/price/open-now.
 7. In A, re-run the same search and publish again: confirm no duplicate spots appear (same rows, same ids — check the spot count on Compare stays the same) and existing votes still reference the same spots.
 8. **Supersede (v0.7.1):** in A, run a search with a different category/area and publish the new batch. In B, confirm the NEW batch leads the compared set in ranked order and the OLD batch no longer leads (it falls back to tally order behind the new batch).
 9. (Negative) In a finalized room, confirm the publish button is disabled/absent with the finalized explanation, and a direct `publish-results` call with a finalized room returns 409.
 10. **Map follows the search (v0.7.2):** after a live search, confirm the map header reads "routes to \<ranked #1\>" with routes drawn to it (not to the first room spot). Tap result #3: confirm the map header, route lines, and legend re-point to #3 and that card shows the selected ring. Tap a room spot card: confirm the map returns to that room spot and no result card stays ringed. On Compare & vote, confirm the previewed-but-unpublished place does NOT appear (previews are local UI state only).
+11. **New room starts empty (v0.7.3):** create a fresh live room (do NOT search yet). On Routes, confirm the "No meeting spots yet" empty state with guidance to search + publish, the working search panel, and a map showing participant markers only. On Compare & vote, confirm the "No spots to compare" empty state, no usable finalize control, and no crash. On Lobby, confirm the room renders normally with no spots. Then search + publish and confirm the spots appear in all three places.
+12. **Map fit frames the selection (v0.7.3):** in a room whose participants are far from some room spots (e.g. Delhi participants + Bengaluru demo spots in a pre-v0.7.3 room, or after publishing Delhi results), run a search and confirm the map reframes on the Delhi area (participants + selected spot) — NOT the whole of India. Tap another result and confirm the viewport reframes on the new selection. Click "Fit all" and confirm the map widens to frame EVERYTHING (all participants + all spots). Recheck the unexplained 10 m blank-zoom observation from the v0.7.2 run (cause unknown — record what the viewport does on each selection change).
 
-- Pass: publish → live visibility in the second browser → shared ranked order for a guest with no engine order → vote → finalize → navigate, with honest labelling throughout, no duplicates on re-publish, supersede on a new batch, and the Routes map following the search (auto-preview + tap-to-preview) without leaking previews onto Compare. Record the room code, browsers, and pass/fail per step.
+- Pass: publish → live visibility in the second browser → shared ranked order for a guest with no engine order → vote → finalize → navigate, with honest labelling throughout, no duplicates on re-publish, supersede on a new batch, the Routes map following the search (auto-preview + tap-to-preview) without leaking previews onto Compare, fresh rooms starting empty with guiding copy, and selection-driven map framing with "Fit all" still framing everything. Record the room code, browsers, and pass/fail per step.
 
 ### Recording the Phase 4 result
 
@@ -411,6 +415,7 @@ Covers the Phase 5 coordination layer: voting Realtime, host/non-host finalizati
 1. Apply all migrations in order (including `20251117000005_0005_coordination.sql`) and redeploy all Edge Functions (see SUPABASE.md). Verify in Dashboard → Database → Replication that `meeting_rooms`, `participants`, `votes`, and `participant_locations` are all in the `supabase_realtime` publication.
 2. Configure `.env` with `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` and start the app (`npm run dev` or `npm run preview` after `npm run build`). Confirm the header shows **Live · Supabase** (not Demo mode).
 3. Use two independent browser sessions (two browsers, or one normal + one private window): browser A creates the room (host), browser B joins with the invite link. Keep both on the same room.
+4. Since v0.7.3, new live rooms start with ZERO spots. The voting/finalize checks below (§8.2/§8.3) need spots first: in A, run a live search on Route Discovery and publish the results, then proceed. (Demo mode and rooms created before v0.7.3 still contain their sample/seeded spots.)
 
 ### 8.2 Voting Realtime
 
@@ -490,7 +495,7 @@ Covers the Phase 5 coordination layer: voting Realtime, host/non-host finalizati
 Companion to §7.9 (which covers the publish → vote → finalize flow end to end). This section covers the coordination mechanics:
 
 1. In A, publish a live search. In B (no reload), confirm the new spots appear on Compare & vote within a couple of seconds — propagation rides the `decision_version` bump on the room row, not a spots subscription.
-2. In A, open Compare & vote immediately after publishing: confirm the published spots lead in engine order (the panel saved the returned ids + returned version). In B — which has no stored engine order — confirm the same spots lead in the SAME published ranked order (shared `published_rank`, v0.7.1), not tally order: with 3 seeded + 5 published spots, B must see all 5 published spots in the capped top 5.
+2. In A, open Compare & vote immediately after publishing: confirm the published spots lead in engine order (the panel saved the returned ids + returned version). In B — which has no stored engine order — confirm the same spots lead in the SAME published ranked order (shared `published_rank`, v0.7.1), not tally order: with 5 published spots in a fresh room (no seeded spots since v0.7.3), B must see all 5 published spots in the capped top 5.
 3. In A, confirm the just-published search now shows the stale banner (the version moved) while the published state ("Published ✓ — view on Compare & vote") stays visible. A new search re-enables publishing.
 4. In A, publish a second, different batch. In B (no reload), confirm the new batch leads and the old batch no longer does (supersede).
 5. (Optional, via SQL) Confirm `decision_version` incremented by exactly 1 per publish, the new rows have `source = 'live'`, non-null `osm_id`, and `published_rank` 1..N in submitted order, the previous batch's rows now have `published_rank IS NULL`, and re-publishing the same places did not create duplicate rows.

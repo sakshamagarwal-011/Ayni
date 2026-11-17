@@ -63,7 +63,7 @@ Functions live in `supabase/functions/`:
 
 | Function | Purpose |
 |---|---|
-| `create-room` | Verify JWT → validate → generate secure invite code → insert room + host + default spots (service role) |
+| `create-room` | Verify JWT → validate → generate secure invite code → insert room + host participant (service role). New rooms start with ZERO spots (v0.7.3 — see the note below) |
 | `join-room` | Verify JWT → normalize code → idempotent participant upsert; expired rooms → 410; finalized rooms joinable for viewing |
 | `update-location` | Verify JWT + membership → upsert own location (expires +2h); expired rooms → 410 |
 | `finalize-meeting` | Verify JWT + host → optimistic-lock finalize (version guard, 409 stale/already-finalized, 410 expired) |
@@ -86,6 +86,12 @@ supabase functions deploy cleanup-expired-locations
 Or deploy all at once: `supabase functions deploy` (from the project root, depending on CLI version).
 
 The shared helpers in `supabase/functions/_shared/` (`cors.ts`, `auth.ts`, `validation.ts`) are imported relatively by each function — no separate deploy needed.
+
+### New rooms start empty (v0.7.3)
+
+`create-room` no longer seeds candidate spots. Before v0.7.3 it inserted the same three Bengaluru demo spots (`source = 'default'`) into every new room; in real rooms far from Bengaluru those rows were noise (thousand-kilometre estimates crowding the UI). Now a new room has zero spots until someone runs a search and publishes the results via `publish-results` — that is the only path by which live-mode spots are created. A location-insert failure still rolls the room back (M-10); there is no longer a spots-insert failure to handle. Existing rooms keep the spots they already have — no migration deletes rows.
+
+Deliberate divergence: Demo mode (`mockService` + `MOCK_SPOTS`) still seeds the three sample spots, because demo mode is explicitly sample data and the sample room (`K7M2QX`) needs spots to demonstrate the full flow. Live mode starts clean; demo mode starts populated. The UI labels each honestly ("Demo spot" vs "Live place").
 
 ## 5. Set Edge Function secrets
 

@@ -247,8 +247,11 @@ status. Live two-browser map sync is a **pending manual test**
   (LocationPicker map tab, lobby pin editing). Keyboard users keep the
   preset/coordinate tabs as full alternatives.
 - **Auto-fit:** Turf `bbox` over participants + spots (+ pin) on first
-  load and when the screen's fit key changes (spot/mode change).
-  Never refits on Realtime ticks. Max zoom 15 guard.
+  load. When the screen's fit key changes (spot/mode change), the map
+  reframes on participants + the SELECTED spot only
+  (`fitPointsForSelection` in `src/map/geo.ts`) — far-away unselected
+  spots never widen the viewport. The "Fit all" button always frames
+  everything. Never refits on Realtime ticks. Max zoom 15 guard.
 - **Routes:** one GeoJSON line layer per map (features coloured per
   participant), casing + animated marching-ants dash via
   `requestAnimationFrame`. Animation pauses when the tab is hidden
@@ -279,7 +282,8 @@ status. Live two-browser map sync is a **pending manual test**
 - Demo-mode badge in the header (existing) + "Demo data" badges on
   map sections and the route legend in Demo mode.
 - "Demo spot" tags on spots whose `source` is `mock` (Demo mode) or
-  `default` (Supabase-seeded demo venues) — see `SpotCard`.
+  `default` (Supabase-seeded demo venues in rooms created before
+  v0.7.3; new rooms start empty — see `SpotCard`).
 - Route labels: "OSRM route (development)", "Estimated — OSRM
   unavailable", "Demo estimate — straight-line". Mock/estimated data
   is never presented as live/real. See `describeRouteSource` in

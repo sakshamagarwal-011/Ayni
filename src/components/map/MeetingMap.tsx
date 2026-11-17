@@ -13,7 +13,7 @@ import { formatDistance, formatDuration, hasSpotDetails, initials } from '../../
 import type { Coordinates, MeetingSpot, Participant } from '../../types';
 import { midpointOf, progressGeometry, simplifyGeometry } from '../../engine/animation';
 import { getMapConfig } from '../../map/config';
-import { boundsForPoints, centreForPoints, isExpired, isExpiringSoon } from '../../map/geo';
+import { boundsForPoints, centreForPoints, fitPointsForSelection, isExpired, isExpiringSoon } from '../../map/geo';
 import {
   buildBuildingsLayer,
   buildRasterFallbackStyle,
@@ -483,14 +483,11 @@ export function MeetingMap({
 
   /* ---------- camera ---------- */
 
-  const fitToPoints = (animate: boolean) => {
+  /** Apply a fit to the given points. Shared by both fit paths so the
+   * fallback, padding, and maxZoom semantics stay identical. */
+  const applyFit = (pts: Coordinates[], animate: boolean) => {
     const map = mapRef.current;
     if (!map) return;
-    const { participants: ps, spots: ss, pinLocation: pin } = propsRef.current;
-    const pts: Coordinates[] = [];
-    for (const p of ps) if (p.location) pts.push({ lat: p.location.lat, lng: p.location.lng });
-    for (const s of ss) pts.push(s.location);
-    if (pin) pts.push(pin);
     const bounds = boundsForPoints(pts);
     // Reduced motion: never animate the camera.
     const duration = animate && !reducedMotionRef.current ? 900 : 0;
@@ -499,6 +496,26 @@ export function MeetingMap({
       return;
     }
     map.fitBounds(bounds, { padding: { top: 48, bottom: 48, left: 40, right: 40 }, maxZoom: 15, duration });
+  };
+
+  /** Fit EVERYTHING: all participants + all spots (+ pin). Used by the
+   * initial fit, the animation-start fit, and the "Fit all" button. */
+  const fitToPoints = (animate: boolean) => {
+    const { participants: ps, spots: ss, pinLocation: pin } = propsRef.current;
+    const pts: Coordinates[] = [];
+    for (const p of ps) if (p.location) pts.push({ lat: p.location.lat, lng: p.location.lng });
+    for (const s of ss) pts.push(s.location);
+    if (pin) pts.push(pin);
+    applyFit(pts, animate);
+  };
+
+  /** Fit the SELECTION: participants + the selected spot only. Used
+   * ONLY by the fitKey-change effect, so a spot change reframes the
+   * map on the relevant area instead of widening it to every
+   * (possibly far-away) unselected spot. */
+  const fitToSelection = (animate: boolean) => {
+    const { participants: ps, spots: ss, selectedSpotId: selected, pinLocation: pin } = propsRef.current;
+    applyFit(fitPointsForSelection(ps, ss, selected, pin), animate);
   };
 
   /* ---------- markers ---------- */
@@ -904,7 +921,7 @@ export function MeetingMap({
   useEffect(() => {
     if (fitKey === undefined || fitKey === lastFitKeyRef.current) return;
     lastFitKeyRef.current = fitKey;
-    if (mapStatus === 'ready') fitToPoints(true);
+    if (mapStatus === 'ready') fitToSelection(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitKey, mapStatus]);
 

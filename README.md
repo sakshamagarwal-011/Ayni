@@ -204,11 +204,13 @@ docs/           Optional manual seed snippet (never auto-applied)
 
 None material. Two clarifications, both documented where they occur:
 
-1. **Spot seeding in Supabase mode:** RLS forbids direct browser inserts into `candidate_spots`, so `create-room` seeds the same three Bengaluru spots server-side (service-role client). Without this, new Supabase rooms would have no spots to compare.
+1. **Spot seeding REMOVED in v0.7.3:** `create-room` used to seed the same three Bengaluru spots server-side (RLS forbids direct browser inserts into `candidate_spots`). That seeding is gone: new live rooms start with zero spots, and spots arrive only when someone publishes live search results via `publish-results`. Demo mode still uses the three sample spots (explicitly labelled sample data). Existing rooms keep the spots they already have.
 2. **Route estimates in Supabase mode** are computed client-side with the same deterministic formula as Demo mode. The `route_estimates` table exists (with RLS) for future server-computed estimates. Live road routing via OSRM is a separate client-side layer (`useMapRoutes`); it does not write to `route_estimates`.
 
 ## Version history
 
+- **v0.7.3** — New live rooms start empty (no more seeded Bengaluru demo spots); the map reframes on participants + the selected spot when the selection changes, while "Fit all" still frames everything.
+- **v0.7.2** — The Routes map follows the search: the #1 result is auto-previewed and tapping any result previews it on the map.
 - **v0.7.1** — Shared published ranking: every participant sees published results in the same ranked order; re-publish supersedes the previous batch.
 - **v0.7.0** — Live search results can be published as votable spots and finalized.
 - **v0.6.3** — Photon place search (works from networks where Overpass is blocked).

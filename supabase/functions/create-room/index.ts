@@ -1,7 +1,16 @@
-// create-room — creates a meeting room + host participant + default spots.
+// create-room — creates a meeting room + host participant.
 // Auth: Bearer JWT (anonymous auth). Writes use the service-role client.
 // Rate limiting: rely on Supabase Edge Function + Auth rate limits; add an
 // upstream gateway limit for production use. See SUPABASE.md.
+//
+// New rooms start with ZERO candidate spots (since v0.7.3): the old
+// server-side seeding of three Bengaluru demo spots was removed —
+// demo venues thousands of kilometres away were noise in real rooms,
+// and their estimates crowded the UI. Spots arrive only via
+// publish-results, which upserts live search results as votable rows.
+// Demo mode (mockService) still seeds sample spots; that divergence is
+// deliberate and documented in SUPABASE.md. Existing rooms keep the
+// spots they already have — no data migration touches them.
 import { getServiceClient, getUserIdFromRequest, readJsonBody } from '../_shared/auth.ts';
 import { handleOptions, jsonError, jsonResponse } from '../_shared/cors.ts';
 import {
@@ -12,46 +21,6 @@ import {
   validateLatLng,
   validateTitle,
 } from '../_shared/validation.ts';
-
-// Default candidate spots seeded server-side so a new room immediately has
-// spots to compare. Same three Bengaluru spots as the demo data. Writes to
-// candidate_spots are Edge-Function-only by RLS design, so seeding must
-// happen here (not from the browser).
-const DEFAULT_SPOTS = [
-  {
-    name: 'The Blue Bean Café',
-    category: 'Café',
-    address: '100 Ft Road, Indiranagar, Bengaluru',
-    lat: 12.9698,
-    lng: 77.641,
-    rating: 4.6,
-    price_level: 2,
-    open_now: true,
-    source: 'default',
-  },
-  {
-    name: 'Violet Gardens Rooftop',
-    category: 'Restaurant',
-    address: 'Church Street, MG Road, Bengaluru',
-    lat: 12.9753,
-    lng: 77.6063,
-    rating: 4.4,
-    price_level: 3,
-    open_now: true,
-    source: 'default',
-  },
-  {
-    name: 'Central Brew House',
-    category: 'Brewery & Kitchen',
-    address: 'Residency Road, Bengaluru',
-    lat: 12.9605,
-    lng: 77.6029,
-    rating: 4.2,
-    price_level: 2,
-    open_now: false,
-    source: 'default',
-  },
-];
 
 Deno.serve(async (req: Request) => {
   const options = handleOptions(req);
@@ -137,9 +106,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const participantId = (participant as { id: string }).id;
-    // Location + spots failures must roll the room back: a room with
-    // no host location or zero spots is silently broken (finalization
-    // needs at least one spot). Previously these errors were ignored.
+    // A location failure must roll the room back: a room with no host
+    // location is silently broken. Previously this error was ignored
+    // (M-10). No spots are seeded here — new rooms start empty and
+    // spots arrive via publish-results, so there is no spots-insert
+    // failure to handle.
     const { error: locInsertError } = await service.from('participant_locations').insert({
       participant_id: participantId,
       room_id: roomId,
@@ -150,14 +121,6 @@ Deno.serve(async (req: Request) => {
       expires_at: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
     });
     if (locInsertError) {
-      await service.from('meeting_rooms').delete().eq('id', roomId);
-      return jsonError('Failed to create room.', 500);
-    }
-
-    const { error: spotsError } = await service
-      .from('candidate_spots')
-      .insert(DEFAULT_SPOTS.map((s) => ({ ...s, room_id: roomId })));
-    if (spotsError) {
       await service.from('meeting_rooms').delete().eq('id', roomId);
       return jsonError('Failed to create room.', 500);
     }

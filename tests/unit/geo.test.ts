@@ -1,8 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { boundsForPoints, centreForPoints, isExpired, isExpiringSoon, straightLineGeometry } from '../../src/map/geo';
+import { boundsForPoints, centreForPoints, fitPointsForSelection, isExpired, isExpiringSoon, straightLineGeometry } from '../../src/map/geo';
+import type { MeetingSpot, Participant } from '../../src/types';
 
 const INDIRANAGAR = { lat: 12.9716, lng: 77.6412 };
 const KORAMANGALA = { lat: 12.9352, lng: 77.6245 };
+const CP_DELHI = { lat: 28.634, lng: 77.2197 };
+const MURADNAGAR = { lat: 28.8317, lng: 77.5104 };
+
+function participant(id: string, location: { lat: number; lng: number } | null): Participant {
+  return {
+    id,
+    roomId: 'room-1',
+    authUid: null,
+    displayName: id,
+    avatarColor: '#000000',
+    isHost: false,
+    isReady: false,
+    joinedAt: '2026-11-17T00:00:00.000Z',
+    lastSeenAt: '2026-11-17T00:00:00.000Z',
+    arrivedAt: null,
+    location: location
+      ? {
+          id: `loc-${id}`,
+          participantId: id,
+          roomId: 'room-1',
+          lat: location.lat,
+          lng: location.lng,
+          label: id,
+          accuracyM: null,
+          updatedAt: '2026-11-17T00:00:00.000Z',
+          expiresAt: '2026-11-18T00:00:00.000Z',
+        }
+      : null,
+  };
+}
+
+function spot(id: string, location: { lat: number; lng: number }): MeetingSpot {
+  return {
+    id,
+    name: id,
+    category: 'Café',
+    address: '',
+    location,
+    rating: 0,
+    priceLevel: 1,
+    openNow: false,
+    source: 'live',
+    osmId: null,
+    publishedRank: null,
+  };
+}
 
 describe('boundsForPoints (Turf bbox)', () => {
   it('returns [west, south, east, north] covering all points', () => {
@@ -86,5 +133,45 @@ describe('location expiry', () => {
     expect(isExpiringSoon({ expiresAt: '2026-11-17T12:16:00Z' }, now)).toBe(false);
     expect(isExpiringSoon({ expiresAt: '2026-11-17T11:59:00Z' }, now)).toBe(false);
     expect(isExpiringSoon({ expiresAt: '2026-11-17T12:10:00Z' }, now, 5 * 60 * 1000)).toBe(false);
+  });
+});
+
+describe('fitPointsForSelection', () => {
+  const delhi = [participant('host', CP_DELHI), participant('guest', MURADNAGAR)];
+  const spots = [spot('bengaluru-cafe', INDIRANAGAR), spot('sahibabad', { lat: 28.6743, lng: 77.3644 })];
+
+  it('frames participants + ONLY the selected spot when the id matches', () => {
+    const pts = fitPointsForSelection(delhi, spots, 'sahibabad');
+    expect(pts).toEqual([CP_DELHI, MURADNAGAR, { lat: 28.6743, lng: 77.3644 }]);
+    expect(pts).not.toContainEqual(INDIRANAGAR);
+  });
+
+  it('frames everything when nothing is selected', () => {
+    expect(fitPointsForSelection(delhi, spots, null)).toEqual([CP_DELHI, MURADNAGAR, INDIRANAGAR, { lat: 28.6743, lng: 77.3644 }]);
+    expect(fitPointsForSelection(delhi, spots, undefined)).toEqual([CP_DELHI, MURADNAGAR, INDIRANAGAR, { lat: 28.6743, lng: 77.3644 }]);
+  });
+
+  it('frames everything when the selected id matches no spot', () => {
+    expect(fitPointsForSelection(delhi, spots, 'missing')).toEqual([CP_DELHI, MURADNAGAR, INDIRANAGAR, { lat: 28.6743, lng: 77.3644 }]);
+  });
+
+  it('skips participants without locations', () => {
+    const pts = fitPointsForSelection(
+      [participant('host', CP_DELHI), participant('noloc', null)],
+      spots,
+      'sahibabad',
+    );
+    expect(pts).toEqual([CP_DELHI, { lat: 28.6743, lng: 77.3644 }]);
+  });
+
+  it('returns empty for no participants, no spots, and no pin', () => {
+    expect(fitPointsForSelection([], [], 'anything')).toEqual([]);
+    expect(fitPointsForSelection([], [], null)).toEqual([]);
+  });
+
+  it('always includes the pin location when present', () => {
+    const pin = { lat: 28.7, lng: 77.4 };
+    expect(fitPointsForSelection(delhi, spots, 'sahibabad', pin)).toEqual([CP_DELHI, MURADNAGAR, { lat: 28.6743, lng: 77.3644 }, pin]);
+    expect(fitPointsForSelection([], [], null, pin)).toEqual([pin]);
   });
 });
