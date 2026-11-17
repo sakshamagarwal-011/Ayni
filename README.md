@@ -6,7 +6,7 @@
 
 **Find the fairest place for everyone to meet.** Create a room, share one invite link, and Ayni finds real meeting spots that balance everyone's travel time — then the group votes, the host locks it in, and everyone navigates to the same place.
 
-🌐 **Live app: [https://meetsync-roan.vercel.app](https://meetsync-roan.vercel.app)** — open it on your phone, create a room, and share the link. No install, no sign-up form: you just pick a name and a starting point.
+🌐 **Live app: [https://ayni-meet.vercel.app](https://ayni-meet.vercel.app)** — open it on your phone, create a room, and share the link. No install, no sign-up form: you just pick a name and a starting point.
 
 > **India-first, open-source only.** Built for complicated Indian roads and galis: real road routing (not straight lines), scooter as a first-class travel mode, and city presets for Bengaluru, Delhi, Mumbai, Pune, Hyderabad, and Chennai. Maps, places, and routing use only open data and open services — MapLibre + OpenStreetMap + Photon + OSRM. No Google Maps, no Google API keys, no Google billing, no paid mapping API. See [MAPS.md](MAPS.md).
 
@@ -63,7 +63,7 @@ The invite code is always in the URL, so meeting links work across browsers and 
 
 ### Option A — Just use the live app (no setup)
 
-Open **[https://meetsync-roan.vercel.app](https://meetsync-roan.vercel.app)** → **Create a meeting** → share the invite link with your group. That's it.
+Open **[https://ayni-meet.vercel.app](https://ayni-meet.vercel.app)** → **Create a meeting** → share the invite link with your group. That's it.
 
 ### Option B — Run it locally in Demo mode (no Supabase needed)
 
@@ -111,7 +111,7 @@ Everything else is optional and documented in [`.env.example`](.env.example): ma
 
 ## Deploy it
 
-**Frontend (Vercel):** this repo is connected to Vercel — every push to `main` auto-deploys to production ([https://meetsync-roan.vercel.app](https://meetsync-roan.vercel.app)). `vercel.json` holds the SPA rewrite (`/(.*)` → `/index.html`) so deep links like `/join/<code>` work. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ROUTING_PROVIDER=osrm`, and `VITE_PLACES_PROVIDER=photon` as Production + Preview env vars (the anon key is deliberately stored as exposed config — it is the publishable key).
+**Frontend (Vercel):** this repo is connected to Vercel — every push to `main` auto-deploys to production ([https://ayni-meet.vercel.app](https://ayni-meet.vercel.app)). `vercel.json` holds the SPA rewrite (`/(.*)` → `/index.html`) so deep links like `/join/<code>` work. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_ROUTING_PROVIDER=osrm`, and `VITE_PLACES_PROVIDER=photon` as Production + Preview env vars (the anon key is deliberately stored as exposed config — it is the publishable key).
 
 **Backend (Supabase):** apply the 9 migrations in order (Dashboard → SQL Editor — see [SUPABASE.md](SUPABASE.md) §3), deploy the Edge Functions (`supabase functions deploy --use-api`), and set the `CLEANUP_SECRET` + `CLEANUP_RETENTION_DAYS` secrets. Optionally schedule `cleanup-expired-locations` every 15 minutes (SUPABASE.md §10).
 
