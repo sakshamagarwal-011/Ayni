@@ -152,19 +152,27 @@ and returns no ranked results.
   the panel summary for live results.
 - Fair use: one sequential POST per search area (max 3 areas), capped
   result counts (default 30/area, max 50), query timeout derived from
-  the client timeout (25s default, clamped 5–180s), no polling, no
+  the client timeout (45s default, clamped 5–180s), no polling, no
   parallel area queries. Responses are cached 10 minutes
   (query-string key) and concurrent identical searches share one
   in-flight request. The Overpass client is shared (one instance per
   endpoint/timeout) so the cache actually hits across searches.
 - Retries: at most one retry, only on 429/504, honouring `Retry-After`
   capped at 30s.
-- Query shape: `node`/`way`/`relation` per tag filter inside
-  `around:<radius>,<lat>,<lng>`, `out center <limit>`. Ways/relations
-  contribute their centre point. Every clause requires `["name"]` so
-  unnamed elements never consume the capped result set; elements
-  without finite coordinates are dropped (counted in
-  `stats.invalidRemoved`).
+- Query shape: `node`/`way` per tag filter inside a bounding-box
+  filter `(south,west,north,east)` enclosing the search circle,
+  `out center <limit>`. Ways contribute their centre point. Relations
+  are not queried, and `around` is not used: live testing (2026-11-17)
+  proved the `around` + relation shape times out server-side on the
+  weak public mirrors, while the bbox shape is far cheaper for them.
+  Every clause requires `["name"]` so unnamed elements never consume
+  the capped result set; elements without finite coordinates are
+  dropped (counted in `stats.invalidRemoved`). Because a bbox covers
+  corner areas outside the circle, fetched places are trimmed back to
+  the circle client-side (haversine geometry only, never a travel
+  time; trimmed places are counted in `outsideCircle` and folded into
+  `stats.invalidRemoved`), so ranking never sees a place outside the
+  search circle.
 - Categories: café, restaurant, bar/pub, park, library, coworking,
   fast food, mall (`shop=mall`), metro station
   (`railway=station` + `station=subway`/`light_rail`), railway

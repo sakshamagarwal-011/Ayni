@@ -1,3 +1,4 @@
+import { EARTH_RADIUS_M, haversineDistanceM } from '../lib/distance';
 import type { CandidatePlace, MeetingCategory, SearchArea } from './types';
 
 /**
@@ -10,14 +11,22 @@ import type { CandidatePlace, MeetingCategory, SearchArea } from './types';
  *   fixture JSON. The network call lives in placesClient.ts.
  *
  * Overpass QL notes:
- * - `nwr` is expanded to node/way/relation so ways/relations return a
- *   `center` (a single representative point) via `out center`.
- * - Timeout 25s matches the public overpass-api.de guidance for
- *   interactive queries. Result count is capped (see buildOverpassQuery).
- * - `around` takes metres, then latitude, longitude.
+ * - `nwr` is expanded to node/way (relations are not queried: they
+ *   almost never represent the POI categories searched here, and
+ *   asking for them makes weak mirror servers time out). Ways return
+ *   a `center` (a single representative point) via `out center`.
+ * - Queries use a bounding-box filter, NOT `around`: live testing
+ *   (2026-11-17) proved the `around` + relation shape times out
+ *   server-side on the small public mirrors, while a bbox query is
+ *   far cheaper for them. A bbox covers corner areas outside the
+ *   search circle, so fetched places are trimmed back to the circle
+ *   client-side (filterPlacesToCircle, haversine geometry only).
+ * - Timeout 45s: weak mirrors need more patience than the 25s the
+ *   public overpass-api.de guidance suggests for interactive queries.
+ *   Result count is capped (see buildOverpassQuery).
  */
 
-export const OVERPASS_TIMEOUT_SECONDS = 25;
+export const OVERPASS_TIMEOUT_SECONDS = 45;
 export const MAX_OVERPASS_RESULTS = 50;
 
 /** OSM tag filters per meeting category. Each entry is one Overpass filter clause. */
@@ -92,6 +101,34 @@ function formatCoord(n: number): string {
   return n.toFixed(5);
 }
 
+/** Overpass bounding-box filter order: (south, west, north, east). */
+export interface SearchAreaBbox {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+}
+
+/**
+ * Bounding box enclosing a search circle, via destination math on the
+ * same earth radius the haversine helper uses — so the box always
+ * contains the whole circle (edge midpoints sit exactly on the
+ * circle). Coordinates are clamped to valid lat/lng ranges.
+ * Antimeridian wrap is not handled (India-first scope).
+ */
+export function bboxForSearchArea(area: SearchArea): SearchAreaBbox {
+  const radiusM = area.radiusKm * 1000;
+  const latDeltaDeg = (radiusM / EARTH_RADIUS_M) * (180 / Math.PI);
+  const cosLat = Math.max(Math.cos((area.centerLat * Math.PI) / 180), 1e-9);
+  const lngDeltaDeg = latDeltaDeg / cosLat;
+  return {
+    south: Math.max(-90, area.centerLat - latDeltaDeg),
+    west: Math.max(-180, area.centerLng - lngDeltaDeg),
+    north: Math.min(90, area.centerLat + latDeltaDeg),
+    east: Math.min(180, area.centerLng + lngDeltaDeg),
+  };
+}
+
 /** Build an Overpass QL query for one search area + category. `limit` is clamped to [1, 50]. */
 export function buildOverpassQuery(
   area: SearchArea,
@@ -100,16 +137,17 @@ export function buildOverpassQuery(
   timeoutSeconds: number = OVERPASS_TIMEOUT_SECONDS,
 ): string {
   const capped = Math.min(MAX_OVERPASS_RESULTS, Math.max(1, Math.floor(limit)));
-  const radiusM = Math.round(area.radiusKm * 1000);
+  const bbox = bboxForSearchArea(area);
+  const bboxFilter = `(${formatCoord(bbox.south)},${formatCoord(bbox.west)},${formatCoord(bbox.north)},${formatCoord(bbox.east)})`;
   const filters = CATEGORY_TAGS[category];
   const clauses: string[] = [];
   const qlTimeout = Math.min(180, Math.max(5, Math.floor(timeoutSeconds)));
   for (const filter of filters) {
-    for (const kind of ['node', 'way', 'relation'] as const) {
+    for (const kind of ['node', 'way'] as const) {
       // ["name"] filters unnamed elements server-side: without it the
       // result cap is consumed by unusable unnamed objects that the
       // parser then drops (crowding out named places).
-      clauses.push(`  ${kind}${filter}["name"](around:${radiusM},${formatCoord(area.centerLat)},${formatCoord(area.centerLng)});`);
+      clauses.push(`  ${kind}${filter}["name"]${bboxFilter};`);
     }
   }
   return (
@@ -117,6 +155,35 @@ export function buildOverpassQuery(
     `(\n${clauses.join('\n')}\n);\n` +
     `out center ${capped};`
   );
+}
+
+export interface CircleFilteredPlaces {
+  places: CandidatePlace[];
+  /** Places fetched inside the bbox but outside the search circle. */
+  outsideCircle: number;
+}
+
+/**
+ * Keep only places within the search circle. The Overpass query uses a
+ * bounding box (cheaper for weak servers than `around`), so the bbox
+ * corners lie outside the circle and must be trimmed here — ranking
+ * must never see a place outside the circle. Haversine is used ONLY
+ * for this geometry check, never as a travel time. Places exactly on
+ * the circle boundary are kept.
+ */
+export function filterPlacesToCircle(places: CandidatePlace[], area: SearchArea): CircleFilteredPlaces {
+  const center = { lat: area.centerLat, lng: area.centerLng };
+  const radiusM = area.radiusKm * 1000;
+  const kept: CandidatePlace[] = [];
+  let outsideCircle = 0;
+  for (const place of places) {
+    if (haversineDistanceM(center, { lat: place.lat, lng: place.lng }) <= radiusM) {
+      kept.push(place);
+    } else {
+      outsideCircle += 1;
+    }
+  }
+  return { places: kept, outsideCircle };
 }
 
 interface OverpassElement {

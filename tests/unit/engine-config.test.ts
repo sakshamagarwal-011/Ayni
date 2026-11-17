@@ -13,6 +13,8 @@ describe('parseEngineConfig', () => {
     expect(DEFAULT_ENGINE_CONFIG.placesProvider).toBe('mock');
     expect(DEFAULT_ENGINE_CONFIG.maxCandidates).toBe(12);
     expect(DEFAULT_ENGINE_CONFIG.maxOsrmRequests).toBe(60);
+    // Weak public mirrors need more patience than the old 25s default.
+    expect(DEFAULT_ENGINE_CONFIG.overpassTimeoutMs).toBe(45_000);
   });
 
   it('parses valid overrides', () => {

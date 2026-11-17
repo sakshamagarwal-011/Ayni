@@ -205,3 +205,41 @@ describe('Overpass endpoint fallback', () => {
     expect(urls).toEqual([DEFAULT_OVERPASS_URL, KUMI, DEFAULT_OVERPASS_URL, KUMI]);
   });
 });
+
+describe('Overpass bbox query + circle filter', () => {
+  it('sends a bbox query (no around, no relations) and trims corner places, counting them', async () => {
+    const bodies: string[] = [];
+    const payload = {
+      elements: [
+        { id: 1, lat: 12.95, lon: 77.64, type: 'node', tags: { name: 'Inside Café', amenity: 'cafe' } },
+        // Bbox corner of AREA's 5 km circle: ~7.1 km from the centre.
+        { id: 2, lat: 13.01657, lon: 77.68734, type: 'node', tags: { name: 'Corner Café', amenity: 'cafe' } },
+      ],
+    };
+    const fetchImpl: OverpassFetchLike = async (_url, init) => {
+      bodies.push(init?.body ?? '');
+      return okResponse(payload);
+    };
+    const client = createOverpassClient({ baseUrl: DEFAULT_OVERPASS_URL, timeoutMs: 5000, fetchImpl });
+    const result = await client.search(AREA, 'cafe', 30);
+    expect(bodies).toHaveLength(1);
+    const sent = decodeURIComponent(bodies[0].replace(/^data=/, ''));
+    expect(sent).toContain('(12.92663,77.59506,13.01657,77.68734)');
+    expect(sent).not.toContain('around');
+    expect(sent).not.toContain('relation');
+    expect(result.places.map((p) => p.name)).toEqual(['Inside Café']);
+    expect(result.outsideCircle).toBe(1);
+    expect(result.dropped).toBe(1);
+  });
+
+  it('derives the QL timeout from the client timeout (45s default -> timeout:45)', async () => {
+    const bodies: string[] = [];
+    const fetchImpl: OverpassFetchLike = async (_url, init) => {
+      bodies.push(init?.body ?? '');
+      return okResponse();
+    };
+    const client = createOverpassClient({ baseUrl: DEFAULT_OVERPASS_URL, timeoutMs: 45_000, fetchImpl });
+    await client.search(AREA, 'cafe', 30);
+    expect(decodeURIComponent(bodies[0].replace(/^data=/, ''))).toContain('[out:json][timeout:45]');
+  });
+});

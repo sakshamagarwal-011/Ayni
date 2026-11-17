@@ -1,5 +1,5 @@
 import { EngineError, EngineUnavailableError } from './errors';
-import { buildOverpassQuery, deduplicatePlaces, parseOverpassResponse } from './places';
+import { buildOverpassQuery, deduplicatePlaces, filterPlacesToCircle, parseOverpassResponse } from './places';
 import type { CandidatePlace, MeetingCategory, SearchArea } from './types';
 
 /**
@@ -11,7 +11,7 @@ import type { CandidatePlace, MeetingCategory, SearchArea } from './types';
  * - In-memory cache keyed by the full query string (10-min TTL) +
  *   in-flight deduplication: identical concurrent searches share one
  *   request.
- * - Timeout via AbortController (default 25s, matching the QL timeout).
+ * - Timeout via AbortController (default 45s, matching the QL timeout).
  * - At most ONE retry, only on 429/504, honouring Retry-After capped
  *   at 30s. No retry storms.
  * - Endpoint fallback: if an endpoint fails (network error, non-2xx
@@ -34,8 +34,11 @@ import type { CandidatePlace, MeetingCategory, SearchArea } from './types';
 
 export interface PlacesSearchResult {
   places: CandidatePlace[];
+  /** Elements dropped during parsing plus places trimmed by the circle filter (see outsideCircle). */
   dropped: number;
   duplicatesRemoved: number;
+  /** Places fetched inside the query bbox but outside the search circle (a subset of `dropped`). 0 for the mock client. */
+  outsideCircle?: number;
   /** Endpoint URL that served this search (absent for the mock client). */
   endpoint?: string;
 }
@@ -267,7 +270,7 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
     provider: 'overpass',
     async search(area, category, limit, signal) {
       // The QL timeout derives from the client timeout so a configured
-      // 60s client timeout is not silently capped by a 25s QL timeout.
+      // 60s client timeout is not silently capped by a 45s QL timeout.
       const query = buildOverpassQuery(area, category, limit, Math.round(options.timeoutMs / 1000));
       const entry = cache.get(query);
       if (entry && (cacheTtlMs <= 0 || now() - entry.fetchedAt <= cacheTtlMs)) {
@@ -277,12 +280,22 @@ export function createOverpassClient(options: OverpassClientOptions): PlacesClie
       if (pending) return shareInflight(pending, signal);
       const task = runQuery(query, signal)
         .then((result) => {
+          // The bbox query over-fetches the corners outside the search
+          // circle; trim them here (before caching) so ranking never
+          // sees a place outside the circle.
+          const circled = filterPlacesToCircle(result.places, area);
+          const filtered: PlacesSearchResult = {
+            ...result,
+            places: circled.places,
+            dropped: result.dropped + circled.outsideCircle,
+            outsideCircle: circled.outsideCircle,
+          };
           if (cache.size >= MAX_CACHE_ENTRIES) {
             const oldest = cache.keys().next().value;
             if (oldest !== undefined) cache.delete(oldest);
           }
-          cache.set(query, { result, fetchedAt: now() });
-          return result;
+          cache.set(query, { result: filtered, fetchedAt: now() });
+          return filtered;
         })
         .finally(() => {
           inflight.delete(query);
@@ -337,13 +350,15 @@ export function createMockPlacesClient(demoPlaces: CandidatePlace[]): PlacesClie
   return {
     provider: 'mock',
     async search(_area, category) {
-      if (category === 'any') return { places: [...demoPlaces], dropped: 0, duplicatesRemoved: 0 };
+      if (category === 'any') {
+        return { places: [...demoPlaces], dropped: 0, duplicatesRemoved: 0, outsideCircle: 0 };
+      }
       const tokens = DEMO_CATEGORY_TOKENS[category] ?? [];
       const places = demoPlaces.filter((p) => {
         const label = p.category.toLowerCase();
         return tokens.some((t) => label.includes(t));
       });
-      return { places, dropped: 0, duplicatesRemoved: 0 };
+      return { places, dropped: 0, duplicatesRemoved: 0, outsideCircle: 0 };
     },
   };
 }

@@ -107,6 +107,21 @@ interface OverpassStubOptions {
   payload?: unknown;
 }
 
+/**
+ * Places inside the 2 km floor circle around (12.9716, 77.6412), for
+ * the co-located-origin tests. The shared fixture's places sit ~2.4 km
+ * from that centre, and the Overpass client now honestly trims
+ * bbox-corner places outside the search circle — so those tests need
+ * a payload a real bbox response for their area would contain.
+ */
+const NEARBY_PAYLOAD = {
+  elements: [
+    { id: 11, lat: 12.9716, lon: 77.64, type: 'node', tags: { name: 'Near A', amenity: 'cafe' } },
+    { id: 12, lat: 12.9716, lon: 77.645, type: 'node', tags: { name: 'Near B', amenity: 'cafe' } },
+    { id: 13, lat: 12.9716, lon: 77.65, type: 'node', tags: { name: 'Near C', amenity: 'cafe' } },
+  ],
+};
+
 function overpassStub(opts: OverpassStubOptions = {}) {
   let calls = 0;
   const fetchImpl: OverpassFetchLike = async () => {
@@ -257,7 +272,7 @@ describe('optimization failure modes (mocked APIs)', () => {
 describe('optimization budgets + dedup + batching (mocked APIs)', () => {
   it('dedups identical route pairs: co-located origins share one request per candidate', async () => {
     const osrm = osrmStub();
-    const overpass = overpassStub();
+    const overpass = overpassStub({ payload: NEARBY_PAYLOAD });
     const sameSpot = input({
       origins: [
         origin(),
@@ -289,7 +304,7 @@ describe('optimization budgets + dedup + batching (mocked APIs)', () => {
 
   it('groups route requests by OSRM profile', async () => {
     const osrm = osrmStub();
-    const overpass = overpassStub();
+    const overpass = overpassStub({ payload: NEARBY_PAYLOAD });
     const mixed = input({
       memberParticipantIds: ['p1', 'p2', 'p3'],
       requiredParticipantIds: ['p1', 'p2', 'p3'],

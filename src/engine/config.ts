@@ -31,7 +31,7 @@ export const DEFAULT_ENGINE_CONFIG: EngineConfig = {
   enabled: true,
   placesProvider: 'mock',
   overpassUrl: DEFAULT_OVERPASS_URL,
-  overpassTimeoutMs: 25_000,
+  overpassTimeoutMs: 45_000,
   maxCandidates: 12,
   maxOsrmRequests: 60,
   placesPerArea: 30,
